@@ -1,0 +1,9 @@
+{
+  "name": "GetFlop",
+  "short_name": "GetFlop",
+  "start_url": "/#/clubs",
+  "display": "standalone",
+  "background_color": "#0b0f0d",
+  "theme_color": "#0d1a14",
+  "icons": [{ "src": "/mark.svg", "sizes": "any", "type": "image/svg+xml" }]
+}

@@ -5,6 +5,11 @@ import { closeExpiredBetting } from './game/hands.js';
 /** Socket handlers contributed by modules (TV displays, …). */
 export const socketExtensions: SocketExtension[] = [];
 
+/** Registers a socket extension once (call at module top level). */
+export function addSocketExtension(ext: SocketExtension): void {
+  if (!socketExtensions.includes(ext)) socketExtensions.push(ext);
+}
+
 export interface Job {
   readonly name: string;
   readonly everyMs: number;
@@ -15,6 +20,13 @@ export interface Job {
 export const jobs: Job[] = [
   { name: 'close-expired-betting', everyMs: 1_000, run: closeExpiredBetting },
 ];
+
+/** Adds or replaces a job by name (call at module top level). */
+export function addJob(job: Job): void {
+  const i = jobs.findIndex((j) => j.name === job.name);
+  if (i >= 0) jobs.splice(i, 1, job);
+  else jobs.push(job);
+}
 
 /** Starts every job on its own interval; a run never overlaps itself. Returns a stop function. */
 export function startBackgroundJobs(ctx: AppContext): () => void {

@@ -1,0 +1,7 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    { "name": "server", "runtimeExecutable": "pnpm", "runtimeArgs": ["--filter", "@getflop/server", "dev"], "port": 4000 },
+    { "name": "web", "runtimeExecutable": "pnpm", "runtimeArgs": ["--filter", "@getflop/web", "dev"], "port": 5173 }
+  ]
+}

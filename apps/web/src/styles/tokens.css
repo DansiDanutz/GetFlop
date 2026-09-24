@@ -1,0 +1,51 @@
+:root {
+  color-scheme: dark;
+  /* Surfaces */
+  --bg: #0b0f0d;
+  --bg-felt: radial-gradient(120% 80% at 50% 0%, #12241b 0%, #0b0f0d 60%);
+  --surface: #131a17;
+  --surface-2: #1a2320;
+  --surface-3: #222d29;
+  --border: #25312c;
+  --border-strong: #34443d;
+
+  /* Text */
+  --text: #f3efe6;
+  --text-2: #b9b3a6;
+  --text-3: #7f7a70;
+
+  /* Brand */
+  --gold: #d9a441;
+  --gold-2: #f0c46a;
+  --gold-soft: rgba(217, 164, 65, 0.14);
+  --felt: #0f3b27;
+  --felt-2: #145233;
+  --cream: #f2ecdf;
+  --cream-2: #e7dfcd;
+  --ink: #16181b;
+
+  /* Semantic */
+  --red: #d8342c;
+  --red-2: #b0221b;
+  --green: #3fbf7a;
+  --green-soft: rgba(63, 191, 122, 0.14);
+  --amber: #f0a92b;
+  --danger: #ef5350;
+  --danger-soft: rgba(239, 83, 80, 0.14);
+  --suit-red: #c8102e;
+  --suit-black: #16181b;
+
+  /* Type */
+  --font-display: 'Commissioner', 'Inter', system-ui, sans-serif;
+  --font-body: 'Inter', system-ui, -apple-system, sans-serif;
+
+  /* Shape */
+  --radius-sm: 10px;
+  --radius: 16px;
+  --radius-lg: 22px;
+  --radius-pill: 999px;
+  --shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+  --gutter: 16px;
+  --tap: 48px;
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+}
