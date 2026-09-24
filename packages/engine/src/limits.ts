@@ -19,19 +19,26 @@ export const DEFAULT_LIMITS: TableLimits = {
 };
 
 /**
- * Long shots get a smaller automatic limit in proportion to their multiplier
- * (tour: 5 PTS on ×170 with a 50 PTS table max). Factor inferred from that point.
+ * Long shots get a smaller automatic limit in proportion to their multiplier:
+ * floor(20 × tableMax / multiplier), in whole Points, rounded down to a multiple
+ * of 5 from 10 up. With a 50 PTS max: ×24 → 40, ×30 → 30, ×60 → 15, ×170 → 5.
  */
-export const AUTO_LIMIT_FACTOR = 17;
+export const AUTO_LIMIT_FACTOR = 20;
 const WHOLE_POINT = 100;
+const ROUND_TO = 5;
 
 export function autoMarketMaxCents(multiplier: number, limits: TableLimits): number {
-  const proportional = Math.floor((limits.maxCents * AUTO_LIMIT_FACTOR) / multiplier / WHOLE_POINT) * WHOLE_POINT;
-  return Math.max(limits.minCents, Math.min(limits.maxCents, proportional));
+  const raw = Math.floor((AUTO_LIMIT_FACTOR * limits.maxCents) / multiplier);
+  if (raw >= limits.maxCents) return limits.maxCents;
+  const points = Math.floor(raw / WHOLE_POINT);
+  const rounded = points >= 10 ? points - (points % ROUND_TO) : points;
+  return Math.max(1, rounded) * WHOLE_POINT;
 }
 
 export function marketMaxCents(slug: string, limits: TableLimits): number {
-  return limits.marketMaxCents[slug] ?? autoMarketMaxCents(getMarket(slug).multiplier, limits);
+  const override = limits.marketMaxCents[slug];
+  const max = override && override > 0 ? override : autoMarketMaxCents(getMarket(slug).multiplier, limits);
+  return Math.max(limits.minCents, max);
 }
 
 export type LimitsError =
