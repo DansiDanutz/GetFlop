@@ -289,7 +289,7 @@ A per-table statistics panel. It is not a prediction, and the UI must say so.
 - **Window**: the last `window` flops (default **50**) of this table. A Ring Game table counts its own history. A tournament counts **only its own hands**, so a new event starts empty.
 - **Markets covered** (short labels): Rainbow, Colour, Ace, Pair, Flush, Low, Run, Jack+, Trips, Str flush (plus any others the server includes).
 - For each market: `hits` (flops in the window where it won), `hitSeq` (boolean per flop, oldest first), expected rate = probability, and `judged` (whether the tolerance band can be evaluated).
-- **Tolerance band** (the dashed band): a market is **hot** if its hit rate is above the band and **cold** if below. Otherwise it is running normally. The band's exact formula is a server parameter (inferred: a binomial confidence band around the expected rate for n = window).
+- **Tolerance band** (the dashed band): a market is **hot** if its hit rate is above the band and **cold** if below. Otherwise it is running normally. The band's exact formula is not visible in the client. Recommended: the same 95% Wilson score interval (z = 1.96) that the client uses for market verdicts elsewhere. Call a market hot when the interval's lower bound is above the expected probability, and cold when its upper bound is below (inferred).
 - Display states:
   - `flopsCounted < 10`: "not enough flops yet".
   - `10 ≤ flopsCounted < window`: dimmed bars, "the window fills as the table plays; nothing is called hot or cold until there are 50 flops".

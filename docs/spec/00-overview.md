@@ -240,3 +240,22 @@ A member with several roles gets an "Open as" switcher: Player (lobby & tables),
 - **Audit**: every Points movement, role change, billing action and admin action is written to an immutable log with the actor.
 - **Realtime**: one authenticated socket.io connection per client, which joins per-table rooms (see 14).
 - **Bot / simulation data** is excluded from all club and platform financial figures unless the "Include simulation" toggle is on.
+
+---
+
+## 6. Open questions (consolidated)
+
+Items marked (inferred) in the spec files need product confirmation. These are the most consequential ones:
+
+1. **Play-charge unit.** The catalogue expresses the play charge as "pct% of every Point played (0–2%)", but the public price is "1 D per Point". Confirm the conversion (the spec assumes 1 PT = 100 D for rating, so 1% = 1 D/PT).
+2. **Grace and pause parameters.** Unpaid play-charge grace days, the `maxD` pending cap, the renewal-overdue deadline, and the thresholds for the "low" and "critical" states.
+3. **Level broadcast quotas** per Level after 2026-12-01, and whether rooms stay fixed at 1 for every Level.
+4. **Diamond pack list** (sizes, euro prices, bonus %, "most popular"), Arena Star packs, and the Arena daily and monthly spending caps.
+5. **Guaranteed prize pool behaviour** when collections exceed the GTD, payout rounding, and chip ties at finish.
+6. **Timers.** Whether `bettingTimerSeconds` auto-closes picks, the no-more-bets grace countdown, the Arena and auto-deal intervals and "sleep" rules, and the TV display lifetime (the tour page says 24 h).
+7. **Tournament exposure cap** (`coupon.over_exposure` pct) and the participation rounding (ceil or round).
+8. **Heat band formula**, and whether `any-trips` / `straight-flush` should be offered as separate markets.
+9. **PIN length.** The server accepts 4–8 digits but the player UI only takes 4. Confirm the product rule.
+10. **Club restore window** (days), the simulation data retention days, and the Arena hand-retention days.
+11. Whether the legacy auto-play, "repeat last picks" and venue geo-fence need to exist in GetFlop (spec says no).
+12. Languages: the tour page shows Italian (`it`), but the app ships only `en` and `el`.

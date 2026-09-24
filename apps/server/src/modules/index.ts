@@ -2,6 +2,7 @@ import { Router } from 'express';
 import type { AppContext } from '../context.js';
 import { authRouter } from './auth/routes.js';
 import { clubsRouter } from './clubs/routes.js';
+import { registerGame } from './game/routes.js';
 import { registerPoints } from './points/routes.js';
 
 /** A module adds its routes to the /api router (it may use several path prefixes). */
@@ -11,6 +12,7 @@ export type ModuleRegistrar = (api: Router, ctx: AppContext) => void;
 const MODULES: ModuleRegistrar[] = [
   (api, ctx) => api.use('/auth', authRouter(ctx)),
   registerPoints,
+  registerGame,
   (api, ctx) => api.use('/clubs', clubsRouter(ctx)),
 ];
 
