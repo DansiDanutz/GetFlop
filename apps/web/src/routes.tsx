@@ -16,6 +16,8 @@ export interface AppRoute {
 import { authRoutes } from './features/auth/routes';
 import { clubsRoutes } from './features/clubs/routes';
 import { playerRoutes } from './features/player/routes';
+import { meRoutes } from './features/me/routes';
+import { messagesRoutes } from './features/messages/routes';
 import { dealerRoutes } from './features/dealer/routes';
 import { inspectorRoutes } from './features/inspector/routes';
 import { ownerRoutes } from './features/owner/routes';
@@ -28,6 +30,8 @@ export const ROUTES: AppRoute[] = [
   ...authRoutes,
   ...clubsRoutes,
   ...playerRoutes,
+  ...meRoutes,
+  ...messagesRoutes,
   ...dealerRoutes,
   ...inspectorRoutes,
   ...ownerRoutes,
