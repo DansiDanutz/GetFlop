@@ -90,15 +90,19 @@ async function loadLobby() {
 }
 
 // ---------- table ----------
+// Responses can arrive after the player has moved to another table (or left the table view);
+// those are dropped so they never overwrite the screen or the video of the current table.
 async function loadTable() {
-  const [view, tours] = await Promise.all([call('GET', `/v1/tables/${state.tableId}`), myRunningTournaments()]);
-  syncClock(view.serverTime);
-  state.data = view;
-  state.tours = tours;
-  if (state.playFor !== 'cash' && !tours.find((t) => t.id === state.playFor)) state.playFor = 'cash';
-  state.myBets = state.playFor === 'cash'
+  const tableId = state.tableId;
+  const [view, tours] = await Promise.all([call('GET', `/v1/tables/${tableId}`), myRunningTournaments()]);
+  if (state.tableId !== tableId) return;
+  const playFor = state.playFor !== 'cash' && !tours.find((t) => t.id === state.playFor) ? 'cash' : state.playFor;
+  const myBets = playFor === 'cash'
     ? (await call('GET', '/v1/me/bets')).filter((b) => b.roundId === view.round?.id)
-    : (tours.find((t) => t.id === state.playFor)?.me?.bets ?? []).filter((b) => b.roundId === view.round?.id);
+    : (tours.find((t) => t.id === playFor)?.me?.bets ?? []).filter((b) => b.roundId === view.round?.id);
+  if (state.tableId !== tableId) return;
+  syncClock(view.serverTime);
+  Object.assign(state, { data: view, tours, playFor, myBets });
   renderTable();
 }
 
