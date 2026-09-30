@@ -40,6 +40,7 @@ function syncStream() {
 
 function go(tab, extra = {}) {
   Object.assign(state, { tab, tableId: null, tournamentId: null }, extra);
+  tableVisit++; // responses requested before this navigation are never shown
   syncStream();
   document.querySelectorAll('[data-tab]').forEach((b) => b.classList.toggle('on', b.dataset.tab === tab));
   listen();
@@ -94,19 +95,24 @@ async function loadLobby() {
 
 // ---------- table ----------
 // Refreshes can overlap (live updates, the backup timer, the player switching table or wallet).
-// A response is shown only if the player is still on the same table with the same betting wallet
-// (cash vs tournament points) it was requested for, and nothing newer has been shown yet. So an
+// A response is shown only if the player is still on the same visit of the same table with the
+// same betting wallet (cash vs tournament points) it was requested for, and nothing newer has
+// been shown yet. So an
 // older response never puts back an old table, video or wallet, and a slow connection still
 // shows every response that is the newest so far.
 let tableLoadSeq = 0;
 let tableShownSeq = 0;
 let tableLoadsInFlight = 0;
+let lastTableLoadAt = 0;
+let tableVisit = 0;
 async function loadTable() {
   const seq = ++tableLoadSeq;
+  const visit = tableVisit;
   const tableId = state.tableId;
   const wanted = state.playFor;
-  const stillWanted = () => state.tableId === tableId && state.playFor === wanted && seq > tableShownSeq;
+  const stillWanted = () => tableVisit === visit && state.tableId === tableId && state.playFor === wanted && seq > tableShownSeq;
   tableLoadsInFlight++;
+  lastTableLoadAt = Date.now();
   try {
     const [view, tours] = await Promise.all([call('GET', `/v1/tables/${tableId}`), myRunningTournaments()]);
     if (!stillWanted()) return;
@@ -232,10 +238,11 @@ function tickCountdown() {
 }
 setInterval(tickCountdown, 250);
 // Backup for the live stream (some hosts cut long connections): refresh the open table now and then.
+const STALLED_MS = 12_000;
 setInterval(() => {
   if (document.visibilityState !== 'visible') return;
-  // Never pile up: on a slow connection wait for the pending refresh instead of replacing it.
-  if (state.tableId) { if (!tableLoadsInFlight) loadTable().catch(() => {}); }
+  // Don't pile up on a slow connection: wait for the pending refresh, but not for a stalled one.
+  if (state.tableId) { if (!tableLoadsInFlight || Date.now() - lastTableLoadAt > STALLED_MS) loadTable().catch(() => {}); }
   else if (state.tournamentId) render();
 }, 4000);
 setInterval(() => { if (document.visibilityState === 'visible') loadMe(); }, 15000);
