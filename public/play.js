@@ -535,8 +535,13 @@ async function loadSafer() {
         waiting ? ` · changes to ${v.pending[key] === null ? 'no limit' : money(v.pending[key], v.currency)} on ${time(v.pendingFrom)}` : ''));
   };
   const save = async () => {
+    // Send only the limits the player changed, so saving one never touches another's pending raise.
     const body = {};
-    for (const [k, el] of Object.entries(fields)) body[k] = el.value.trim() === '' ? null : Math.round(Number(el.value) * 100);
+    for (const [k, el] of Object.entries(fields)) {
+      if (el.value === el.defaultValue) continue;
+      body[k] = el.value.trim() === '' ? null : Math.round(Number(el.value) * 100);
+    }
+    if (!Object.keys(body).length) return toast('Nothing changed.');
     try {
       const after = await call('POST', '/v1/me/limits', body);
       toast(after.pending ? 'Saved. Lower limits apply now; higher ones after 24 hours.' : 'Limits saved.');

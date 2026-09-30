@@ -132,3 +132,24 @@ test('safer play over HTTP, and staff can see a player\'s settings', async (t) =
   const audit = await s.app.audit.list(10, 'player.time_out');
   assert.equal(audit.length, 1);
 });
+
+test('a late refund for a bet placed before the window does not offset losses inside it', async () => {
+  const s = await setup();
+  const { p } = await directPlayer(s, 'noor', 100_000);
+  const other = await s.app.game.createTable({ name: 'T2' }, s.admin);
+  await s.app.safer.setLimits(p, { lossDay: 5000 });
+  // A bet on T1 whose hand is voided a day later.
+  const old = await s.app.game.openRound(s.table.id, 'd');
+  await s.app.game.placeBet(p, { roundId: old.id, marketId: 'RAINBOW', stake: 3000 });
+  s.advance(DAY + HOUR);
+  // Inside the new window: 4,000 lost on T2, then the old hand is voided (3,000 back).
+  const r = await s.app.game.openRound(other.id, 'd');
+  await s.app.game.placeBet(p, { roundId: r.id, marketId: 'RAINBOW', stake: 4000 });
+  await s.app.game.closeRound(r.id, 'd');
+  await s.app.game.submitFlop(r.id, ['Ah', 'Kh', '2h'], 'd');
+  await s.app.game.voidRound(old.id, 'misdeal', 'f');
+  assert.equal((await s.app.safer.view(p)).used.lossDay, 4000);
+  const r2 = await s.app.game.openRound(other.id, 'd');
+  await assert.rejects(s.app.game.placeBet(p, { roundId: r2.id, marketId: 'RAINBOW', stake: 1500 }), { code: 'LOSS_LIMIT' });
+  await s.app.game.placeBet(p, { roundId: r2.id, marketId: 'RAINBOW', stake: 1000 });
+});

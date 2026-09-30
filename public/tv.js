@@ -18,6 +18,9 @@ async function start() {
     if (tables.length !== 1) return pick(tables);
     tableId = tables[0].id;
   }
+  // A wrong or retired table link: say so and offer the tables that are live.
+  const first = await call('GET', `/v1/tables/${encodeURIComponent(tableId)}`).catch(() => null);
+  if (!first || first.table.status !== 'active') return pick(await call('GET', '/v1/tables').catch(() => []), 'That table is not dealing. Pick one:');
   await Promise.all([load(), loadTournament()]);
   stream(`/v1/stream?table=${encodeURIComponent(tableId)}`, (ev, data) => {
     if (ev === 'round.bets' && view?.round?.id === data.id) { view.round.betsByMarket = data.betsByMarket; return render(); }
@@ -31,9 +34,9 @@ async function start() {
   keepAwake();
 }
 
-function pick(tables) {
+function pick(tables, title = 'Which table is this screen for?') {
   $('#app').replaceChildren(h('div', { class: 'picker' },
-    h('h1', {}, 'Which table is this screen for?'),
+    h('h1', {}, title),
     tables.length ? tables.map((t) => h('a', { href: `?table=${encodeURIComponent(t.id)}` }, t.name)) : h('p', { class: 'muted' }, 'No active tables yet.')));
 }
 

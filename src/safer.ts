@@ -32,9 +32,6 @@ type LimitKey = keyof typeof LIMITS;
 type Limits = Record<LimitKey, number | null>;
 const KEYS = Object.keys(LIMITS) as LimitKey[];
 
-// Ledger kinds that move money in or out of GetFlop rather than being play.
-const FUNDING_KINDS = ['cashier.deposit', 'cashier.withdraw', 'operator.transfer', 'deposit', 'withdraw'];
-
 type State = Limits & { pending: Partial<Limits> | null; pendingFrom: number | null; excludedUntil: number | null };
 
 export class SaferPlay {
@@ -175,14 +172,26 @@ export class SaferPlay {
     );
   }
 
-  // Net money the player's balance lost to play in the last `window` ms (0 if they are ahead).
+  // Net money lost to play started in the last `window` ms (0 if the player is ahead): each cash bet
+  // placed in the window counts its stake minus what came back (winnings or a refund), open bets
+  // their whole stake; each paid tournament joined in the window its buy-in minus any prize or
+  // refund. Results are tied to when the money was put at risk, so a late refund or payout for an
+  // older bet cannot offset losses made inside the window.
   private async loss(playerId: string, currency: string, window: number) {
-    const row = await this.db.get<{ net: number }>(
-      `SELECT COALESCE(SUM(e.amount), 0) AS net FROM ledger_entries e JOIN ledger_tx t ON t.id = e.tx_id
-       WHERE e.account = ? AND e.currency = ? AND t.created_at > ? AND t.kind NOT IN (${FUNDING_KINDS.map(() => '?').join(', ')})`,
-      `player:${playerId}`, currency, this.now() - window, ...FUNDING_KINDS,
+    const since = this.now() - window;
+    const cash = await this.db.get<{ net: number }>(
+      `SELECT COALESCE(SUM(stake - CASE WHEN status IN ('won','refunded') THEN COALESCE(payout, 0) ELSE 0 END), 0) AS net
+       FROM bets WHERE player_id = ? AND currency = ? AND placed_at > ? AND status IN ('pending','open','won','lost','refunded')`,
+      playerId, currency, since,
     );
-    return Math.max(0, -Number(row!.net));
+    const tours = await this.db.get<{ net: number }>(
+      `SELECT COALESCE(SUM(t.buy_in - e.prize - CASE WHEN EXISTS (
+           SELECT 1 FROM ledger_tx x WHERE x.kind = 'tournament.refund' AND x.ref = t.id || ':' || e.player_id) THEN t.buy_in ELSE 0 END), 0) AS net
+       FROM tournament_entries e JOIN tournaments t ON t.id = e.tournament_id
+       WHERE e.player_id = ? AND t.currency = ? AND t.buy_in > 0 AND e.joined_at > ?`,
+      playerId, currency, since,
+    );
+    return Math.max(0, Number(cash!.net) + Number(tours!.net));
   }
 
   private async deposits(playerId: string, currency: string, window: number) {
