@@ -103,7 +103,8 @@ async function players(el, q = '') {
     h('form', { class: 'row', onsubmit: (e) => { e.preventDefault(); players(el, e.target.q.value); } }, h('input', { name: 'q', value: q, placeholder: 'Search name or username', style: 'flex:1' }), h('button', {}, 'Search')),
     h('table', { class: 'list', style: 'margin-top:12px' },
       h('tr', {}, h('th', {}, 'Player'), h('th', {}, 'Via'), h('th', { class: 'num' }, 'Balance'), h('th', {}, 'Cashier (direct players)')),
-      list.map((p) => h('tr', {}, h('td', {}, p.displayName, h('div', { class: 'muted small' }, p.username ?? p.externalId)), h('td', {}, p.operator),
+      list.map((p) => h('tr', {}, h('td', {}, p.displayName, h('div', { class: 'muted small' }, p.username ?? p.externalId),
+        p.onBreakUntil ? h('span', { class: 'pill void', title: 'Time-out or self-exclusion: no bets, tournaments or deposits' }, `on break until ${new Date(p.onBreakUntil).toLocaleDateString()}`) : ''), h('td', {}, p.operator),
         h('td', { class: 'num' }, p.operator === 'GetFlop Direct' ? money(p.balance, p.currency) : '—'),
         h('td', {}, p.operator === 'GetFlop Direct' ? h('form', { class: 'row', onsubmit: async (e) => {
           e.preventDefault();

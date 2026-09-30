@@ -164,6 +164,18 @@ CREATE TABLE IF NOT EXISTS player_logins (
   password_hash TEXT NOT NULL
 );
 
+-- Safer-play settings of direct players (see safer.ts). Amounts in minor units; NULL = no limit.
+CREATE TABLE IF NOT EXISTS player_limits (
+  player_id TEXT PRIMARY KEY REFERENCES players(id),
+  loss_day INTEGER,
+  loss_week INTEGER,
+  deposit_week INTEGER,
+  pending TEXT,
+  pending_from INTEGER,
+  excluded_until INTEGER,
+  updated_at INTEGER NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS tournaments (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,

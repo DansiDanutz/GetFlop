@@ -5,6 +5,7 @@ import type { Ledger } from './ledger.ts';
 import type { Audit } from './audit.ts';
 import type { OperatorRow } from './wallet.ts';
 import type { PlayerRow } from './game.ts';
+import type { SaferPlay } from './safer.ts';
 import { checkPassword, fail, hashPassword, int, newId, newSecret, optStr, safeEqual, sha256, signPayload, str } from './util.ts';
 
 const PLAYER_SESSION_MS = 12 * 3600_000;
@@ -16,8 +17,10 @@ export class Accounts {
   private ledger: Ledger;
   private audit: Audit;
   private now: () => number;
+  private safer: SaferPlay;
 
-  constructor(db: Db, ledger: Ledger, audit: Audit, now: () => number) {
+  constructor(db: Db, ledger: Ledger, audit: Audit, now: () => number, safer: SaferPlay) {
+    this.safer = safer;
     this.db = db;
     this.ledger = ledger;
     this.audit = audit;
@@ -205,6 +208,7 @@ export class Accounts {
     const op = await this.operator('op_direct');
     const why = str(note, 'note', 200);
     await this.db.tx(async () => {
+      if (amount > 0) await this.safer.assertCanDeposit(player!.id, amount, op.currency);
       await this.ledger.transfer(amount > 0 ? 'cashier.deposit' : 'cashier.withdraw', null, op.currency, 'house:cashier', `player:${player!.id}`, amount);
       await this.audit.log(actor, 'player.cashier', { playerId, amount, note: why });
     });

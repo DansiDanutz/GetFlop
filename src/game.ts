@@ -19,6 +19,7 @@
 import { type Flop, flopIndex, formatCard, parseFlop } from './cards.ts';
 import { MARKETS, payoutFor, priceList, priceX100, TOTAL_FLOPS } from './markets.ts';
 import type { Db, Row } from './db.ts';
+import type { SaferPlay } from './safer.ts';
 import type { Ledger } from './ledger.ts';
 import type { Audit } from './audit.ts';
 import type { Events } from './events.ts';
@@ -60,8 +61,10 @@ export class Game {
   private events: Events;
   private wallet: SeamlessWallet;
   private now: () => number;
+  readonly safer: SaferPlay;
 
-  constructor(db: Db, ledger: Ledger, audit: Audit, events: Events, wallet: SeamlessWallet, now: () => number) {
+  constructor(db: Db, ledger: Ledger, audit: Audit, events: Events, wallet: SeamlessWallet, now: () => number, safer: SaferPlay) {
+    this.safer = safer;
     this.db = db;
     this.ledger = ledger;
     this.audit = audit;
@@ -400,6 +403,7 @@ export class Game {
       if (op.status !== 'active') fail(403, 'OPERATOR_SUSPENDED');
       const fresh = await this.db.get<PlayerRow>('SELECT status FROM players WHERE id = ?', player.id);
       if (fresh?.status !== 'active') fail(403, 'PLAYER_BLOCKED');
+      await this.safer.assertCanPlay(player, stake, op.currency);
       const r = await this.round(roundId);
       if (r.status !== 'open' || this.now() >= r.closes_at) fail(409, 'BETTING_CLOSED');
       await this.assertNotSeated(r.table_id, player.id);

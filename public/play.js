@@ -18,6 +18,7 @@ async function loadMe() {
     return;
   }
   $('#who').textContent = state.me.displayName;
+  $('#safer-tab').hidden = !state.me.direct; // partners run limits for their own players
   $('#balance').textContent = state.me.balance === null ? '' : money(state.me.balance, state.me.currency);
 }
 
@@ -76,6 +77,7 @@ async function render() {
     else if (state.tournamentId) await loadTournament();
     else if (state.tab === 'tables') await loadLobby();
     else if (state.tab === 'tournaments') await loadTournaments();
+    else if (state.tab === 'safer') await loadSafer();
     else await loadHistory();
   } catch (e) {
     if (seq === renderSeq) toast(e.message, true);
@@ -308,6 +310,55 @@ async function loadHistory() {
         h('td', { class: 'num' }, money(b.stake, b.currency)), h('td', { class: 'num' }, odds(b.oddsX100)), h('td', {}, b.flop ? flop(b.flop, true) : ''),
         h('td', {}, h('span', { class: `pill ${b.status}` }, b.status)), h('td', { class: 'num' }, b.payout ? money(b.payout, b.currency) : ''))),
     ) : h('div', { class: 'muted' }, 'No bets yet.')));
+}
+
+// ---------- safer play ----------
+const LIMIT_LABELS = { lossDay: 'Loss limit per 24 hours', lossWeek: 'Loss limit per 7 days', depositWeek: 'Deposit limit per 7 days' };
+const breakLabel = (d) => (d === 1 ? '24 hours' : d < 180 ? `${d} days` : d < 365 ? '6 months' : d === 365 ? '1 year' : '5 years');
+
+async function loadSafer() {
+  const v = await call('GET', '/v1/me/limits');
+  const fields = {};
+  const limitRow = (key) => {
+    fields[key] = h('input', { type: 'number', min: '1', step: '0.01', placeholder: 'No limit', value: v[key] === null ? '' : (v[key] / 100).toFixed(2) });
+    const waiting = v.pending && key in v.pending;
+    return h('label', {}, LIMIT_LABELS[key], fields[key],
+      h('div', { class: 'small muted' }, `Used: ${money(v.used[key], v.currency)}${v[key] !== null ? ` of ${money(v[key], v.currency)}` : ''}`,
+        waiting ? ` · changes to ${v.pending[key] === null ? 'no limit' : money(v.pending[key], v.currency)} on ${time(v.pendingFrom)}` : ''));
+  };
+  const save = async () => {
+    const body = {};
+    for (const [k, el] of Object.entries(fields)) body[k] = el.value.trim() === '' ? null : Math.round(Number(el.value) * 100);
+    try {
+      const after = await call('POST', '/v1/me/limits', body);
+      toast(after.pending ? 'Saved. Lower limits apply now; higher ones after 24 hours.' : 'Limits saved.');
+      loadSafer();
+    } catch (e) { toast(e.message, true); }
+  };
+  const takeBreak = async (days) => {
+    if (!confirm(`Take a break for ${breakLabel(days)}? You won't be able to bet, join tournaments or deposit until it ends, and it cannot be undone.`)) return;
+    try {
+      await call('POST', '/v1/me/break', { days });
+      toast(`Your break has started. See you after ${breakLabel(days)}.`);
+      loadSafer();
+    } catch (e) { toast(e.message, true); }
+  };
+  $('#view').replaceChildren(h('div', { class: 'split' },
+    h('div', { class: 'card' },
+      h('h3', {}, 'Limits'),
+      h('p', { class: 'small muted' }, 'Lowering a limit works straight away. Raising or removing one takes effect after 24 hours.'),
+      ...Object.keys(LIMIT_LABELS).map(limitRow),
+      h('button', { class: 'primary', onclick: save }, 'Save limits'),
+    ),
+    h('div', { class: 'card' },
+      h('h3', {}, 'Take a break'),
+      v.excludedUntil
+        ? h('p', {}, `You are on a break until ${time(v.excludedUntil)}. You can still withdraw your balance at the desk.`)
+        : h('p', { class: 'small muted' }, 'Pause betting, tournaments and deposits. A break cannot be shortened once it starts.'),
+      h('div', { class: 'row' }, v.breakDays.map((d) => h('button', { onclick: () => takeBreak(d) }, breakLabel(d)))),
+      h('p', { class: 'small muted', style: 'margin-top:12px' }, 'Play for fun, never to win back losses. If gambling stops being fun, talk to someone: a friend, our staff, or a support line in your country.'),
+    ),
+  ));
 }
 
 await loadMe();

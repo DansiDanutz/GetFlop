@@ -22,7 +22,7 @@ No frameworks and no runtime dependencies. Everything runs on what ships with No
 
 ```bash
 npm run demo     # in-memory demo with staff, a table, players and a tournament; prints the links
-npm test         # 30 tests: pricing, ledger, rounds, risk limits, seating, wallets, API, commission, tournaments
+npm test         # 35 tests: pricing, ledger, rounds, risk limits, seating, wallets, API, commission, tournaments, safer play
 TEST_DATABASE_URL=postgres://... npm test   # the same tests against PostgreSQL (the database is wiped first)
 npm run odds     # the price list: exact probabilities and odds at a given margin (npm run odds -- 300)
 ```
@@ -76,6 +76,7 @@ Put it behind HTTPS (any reverse proxy, e.g. Caddy or nginx). Live updates use S
 | `src/wallet.ts` | Seamless wallet calls to partners, with a retrying outbox |
 | `src/accounts.ts` | Partners and request signing, players, sign-up, cashier, staff, sessions |
 | `src/tournaments.ts` | Tournament engine and strategies (first: points race) |
+| `src/safer.ts` | Safer play for direct players: loss and deposit limits, time-outs, self-exclusion |
 | `src/billing.ts` | GGR reports and commission invoices with carry-forward |
 | `src/audit.ts` | Hash-chained audit log |
 | `src/http.ts`, `src/app.ts` | HTTP toolkit and the API routes |

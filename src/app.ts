@@ -13,6 +13,7 @@ import { type FetchFn, SeamlessWallet } from './wallet.ts';
 import { Game, type PlayerRow } from './game.ts';
 import { Accounts } from './accounts.ts';
 import { Billing } from './billing.ts';
+import { SaferPlay } from './safer.ts';
 import { STRATEGIES, Tournaments } from './tournaments.ts';
 import { DEMO_STAFF } from './seed.ts';
 import { dispatch, openStream, type Req, Router, serveStatic, STREAMED } from './http.ts';
@@ -43,8 +44,9 @@ export async function createApp(opts: AppOptions = {}) {
   const ledger = new Ledger(db, now);
   const events = new Events();
   const wallet = new SeamlessWallet(db, audit, now, opts.fetchFn);
-  const game = new Game(db, ledger, audit, events, wallet, now);
-  const accounts = new Accounts(db, ledger, audit, now);
+  const safer = new SaferPlay(db, audit, now);
+  const game = new Game(db, ledger, audit, events, wallet, now, safer);
+  const accounts = new Accounts(db, ledger, audit, now, safer);
   const billing = new Billing(db, audit, now);
   const tournaments = new Tournaments(db, ledger, audit, events, game, now);
   await accounts.directOperator(opts.directCurrency ?? 'EUR');
@@ -92,8 +94,12 @@ export async function createApp(opts: AppOptions = {}) {
   });
   r.get('/v1/me', async (req) => {
     const p = await player(req);
-    return { playerId: p.id, displayName: p.display_name, seatedAt: await game.seatOf(p.id), ...(await balanceOf(p)) };
+    return { playerId: p.id, displayName: p.display_name, direct: p.operator_id === 'op_direct', seatedAt: await game.seatOf(p.id), ...(await balanceOf(p)) };
   });
+  // Safer play (direct players): limits and breaks. See safer.ts.
+  r.get('/v1/me/limits', async (req) => safer.view(await player(req)));
+  r.post('/v1/me/limits', async (req) => safer.setLimits(await player(req), req.body));
+  r.post('/v1/me/break', async (req) => safer.takeBreak(await player(req), req.body.days));
   r.get('/v1/me/bets', async (req) => game.playerBets((await player(req)).id));
   r.post('/v1/bets', async (req) => game.placeBet(await player(req), req.body));
   r.post('/v1/auth/register', (req) => accounts.registerPlayer(req.body));
@@ -159,12 +165,18 @@ export async function createApp(opts: AppOptions = {}) {
     const q = `%${req.query.get('q') ?? ''}%`;
     return db.all(
       `SELECT p.id, p.display_name AS "displayName", p.external_id AS "externalId", p.status, o.name AS operator, o.currency, l.username,
-              COALESCE(b.balance, 0) AS balance
+              COALESCE(b.balance, 0) AS balance, CASE WHEN pl.excluded_until > ? THEN pl.excluded_until END AS "onBreakUntil"
        FROM players p JOIN operators o ON o.id = p.operator_id LEFT JOIN player_logins l ON l.player_id = p.id
        LEFT JOIN balances b ON b.account = 'player:' || p.id AND b.currency = o.currency
+       LEFT JOIN player_limits pl ON pl.player_id = p.id
        WHERE p.display_name LIKE ? OR l.username LIKE ? OR p.external_id LIKE ? ORDER BY p.created_at DESC LIMIT 100`,
-      q, q, q,
+      now(), q, q, q,
     );
+  });
+  r.get('/v1/admin/players/:id/limits', async (req) => {
+    await staff(req, 'supervisor');
+    const p = (await db.get<PlayerRow>('SELECT * FROM players WHERE id = ?', req.params.id)) ?? fail(404, 'PLAYER_NOT_FOUND');
+    return safer.view(p!);
   });
   r.post('/v1/admin/players/:id/cashier', async (req) => accounts.cashier(req.params.id, req.body.amount, req.body.note, await actor(req, 'admin')));
   r.get('/v1/admin/operators', async (req) => { await staff(req, 'admin'); return accounts.listOperators(); });
@@ -302,7 +314,7 @@ export async function createApp(opts: AppOptions = {}) {
     await db.close();
   }
 
-  return { server, db, ledger, audit, events, wallet, game, accounts, billing, tournaments, startBackground, bootstrapAdmin, stop, tick: tickOnce };
+  return { server, db, ledger, audit, events, wallet, game, accounts, safer, billing, tournaments, startBackground, bootstrapAdmin, stop, tick: tickOnce };
 }
 
 export type App = Awaited<ReturnType<typeof createApp>>;
