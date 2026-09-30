@@ -129,14 +129,15 @@ export class Accounts {
     const ref = `${op.id}:${str(input.txId, 'txId', 100)}`;
     const signed = direction === 'deposit' ? amount : -amount;
     // Transfers recorded before txIds were unified used the kinds 'deposit' and 'withdraw' with
-    // the same ref; they are still the same transfer.
-    const prior = this.db.get<{ id: string }>(
-      "SELECT id FROM ledger_tx WHERE ref = ? AND kind IN ('operator.transfer', 'deposit', 'withdraw') ORDER BY created_at LIMIT 1",
-      ref,
+    // the same ref, and then one txId could have been used once in each direction. A retry that
+    // matches any of those earlier transfers is the same transfer.
+    const priors = this.db.all<{ amount: number | null }>(
+      `SELECT e.amount FROM ledger_tx t LEFT JOIN ledger_entries e ON e.tx_id = t.id AND e.account = ?
+       WHERE t.ref = ? AND t.kind IN ('operator.transfer', 'deposit', 'withdraw')`,
+      `player:${player.id}`, ref,
     );
-    if (prior) {
-      const entry = this.db.get<{ amount: number }>('SELECT amount FROM ledger_entries WHERE tx_id = ? AND account = ?', prior.id, `player:${player.id}`);
-      if (entry?.amount !== signed)
+    if (priors.length) {
+      if (!priors.some((p) => p.amount === signed))
         fail(409, 'TX_ID_REUSED', 'This txId was already used for a different transfer (player, direction or amount)');
     } else {
       this.ledger.transfer('operator.transfer', ref, op.currency, `operator:${op.id}`, `player:${player.id}`, signed);

@@ -186,3 +186,13 @@ test('transfers recorded under the old deposit/withdraw kinds are still recognis
   assert.equal(s.app.accounts.transfer(s.opRow, 'withdraw', { playerId: 'legacy', amount: 200, txId: 't-old-2' }).balance, 800);
   assert.throws(() => s.app.accounts.transfer(s.opRow, 'withdraw', { playerId: 'legacy', amount: 1000, txId: 't-old-1' }), { code: 'TX_ID_REUSED' });
 });
+
+test('a legacy txId used once in each direction answers both retries', () => {
+  const s = setup();
+  const p = s.player('both', 0);
+  s.app.ledger.transfer('deposit', `${s.op.id}:same`, 'EUR', `operator:${s.op.id}`, `player:${p.id}`, 1000);
+  s.app.ledger.transfer('withdraw', `${s.op.id}:same`, 'EUR', `player:${p.id}`, `operator:${s.op.id}`, 200);
+  assert.equal(s.app.accounts.transfer(s.opRow, 'deposit', { playerId: 'both', amount: 1000, txId: 'same' }).balance, 800);
+  assert.equal(s.app.accounts.transfer(s.opRow, 'withdraw', { playerId: 'both', amount: 200, txId: 'same' }).balance, 800);
+  assert.throws(() => s.app.accounts.transfer(s.opRow, 'withdraw', { playerId: 'both', amount: 300, txId: 'same' }), { code: 'TX_ID_REUSED' });
+});
