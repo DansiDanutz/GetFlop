@@ -45,7 +45,14 @@ async function refresh() {
   state.round = v.round;
   state.camera = v.camera;
   // Betting closed and the flop not in yet: read it from the camera.
-  if (state.round?.status === 'closed' && state.camera.mode !== 'off' && state.camera.visionReady && !state.scanning && state.scanDone !== state.round.id) scanLoop(state.round.id);
+  if (state.round?.status === 'closed' && state.camera.mode !== 'off' && state.camera.visionReady && !state.scanning && state.scanDone !== scanKey()) scanLoop(state.round.id);
+}
+
+// Reading pauses once a trusted reading waits for a person, for exactly that situation: the same
+// hand, the same camera mode, the same pending entry. If any of them changes (a switch from assist
+// to auto, or a mismatch that clears the pending entry), reading resumes by itself.
+function scanKey() {
+  return `${state.round?.id}:${state.camera?.mode}:${!!state.round?.awaitingConfirmation}`;
 }
 
 async function startCamera() {
@@ -110,7 +117,7 @@ async function scanLoop(roundId) {
           render();
           if (['settled', 'done', 'off'].includes(res.state)) break;
           // A trusted reading is waiting for a person: stop reading (and paying for) more pictures.
-          if (['read', 'awaiting_confirmation'].includes(res.state)) { state.scanDone = roundId; break; }
+          if (['read', 'awaiting_confirmation'].includes(res.state)) { await refresh().catch(() => {}); state.scanDone = scanKey(); break; }
         } catch (e) {
           state.last = { state: 'error', message: e.message, at: Date.now() };
           render();
