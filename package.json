@@ -1,0 +1,14 @@
+{
+  "name": "getflop",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Live pre-flop betting on real dealer-dealt poker hands, with a B2B operator API.",
+  "engines": { "node": ">=22.18" },
+  "scripts": {
+    "start": "node --disable-warning=ExperimentalWarning src/main.ts",
+    "demo": "node --disable-warning=ExperimentalWarning src/demo.ts",
+    "test": "node --disable-warning=ExperimentalWarning --test test/*.test.ts",
+    "odds": "node src/print-odds.ts"
+  }
+}
