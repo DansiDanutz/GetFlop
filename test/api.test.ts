@@ -102,3 +102,25 @@ test('commission invoices carry losing periods forward', async () => {
   assert.equal(inv2.commission, Math.floor(97_250 * 0.2));
   assert.equal(inv2.carry_out, 0);
 });
+
+test('demo mode: instant play-money players, demo logins, and clocks that advance on requests', async (t) => {
+  const s = setup({ demo: true, tickOnRequest: true });
+  t.after(() => s.app.stop());
+  assert.equal((await http(s.app, 'GET', '/v1/demo/info')).body.demo, true);
+  const guest = await http(s.app, 'POST', '/v1/demo/player');
+  assert.equal(guest.status, 200);
+  const me = await http(s.app, 'GET', '/v1/me', undefined, { authorization: `Bearer ${guest.body.token}` });
+  assert.equal(me.body.balance, 50_000);
+  // No background timer: the round closes on the next request after its window.
+  const round = s.app.game.openRound(s.table.id, 'staff:dealer');
+  s.advance(31_000);
+  await http(s.app, 'GET', '/v1/health');
+  assert.equal(s.app.game.round(round.id).status, 'closed');
+});
+
+test('demo endpoints are off outside demo mode', async (t) => {
+  const s = setup();
+  t.after(() => s.app.stop());
+  assert.equal((await http(s.app, 'GET', '/v1/demo/info')).body.demo, false);
+  assert.equal((await http(s.app, 'POST', '/v1/demo/player')).status, 404);
+});

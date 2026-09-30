@@ -164,3 +164,5 @@ function tick() {
   el.textContent = r?.status === 'open' ? `${Math.max(0, Math.ceil((r.closesAt - serverNow()) / 1000))}s` : '';
 }
 setInterval(tick, 250);
+// Backup for the live stream: refresh the table console now and then.
+setInterval(() => { if (state.tableId && state.data && document.visibilityState === 'visible') load(); }, 4000);

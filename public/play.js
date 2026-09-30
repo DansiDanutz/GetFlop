@@ -196,6 +196,13 @@ function tickCountdown() {
   if (left > 0) state.closedShown = false;
 }
 setInterval(tickCountdown, 250);
+// Backup for the live stream (some hosts cut long connections): refresh the open table now and then.
+setInterval(() => {
+  if (document.visibilityState !== 'visible') return;
+  if (state.tableId) loadTable().catch(() => {});
+  else if (state.tournamentId) render();
+}, 4000);
+setInterval(() => { if (document.visibilityState === 'visible') loadMe(); }, 15000);
 
 // ---------- tournaments ----------
 async function loadTournaments() {

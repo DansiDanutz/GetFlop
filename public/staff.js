@@ -12,7 +12,12 @@ export async function requireStaff(onReady) {
     onReady(me);
   } catch {
     localStorage.removeItem('gf.staff');
+    const demo = await call('GET', '/v1/demo/info').catch(() => ({ demo: false, staff: [] }));
+    const fill = (s) => { document.querySelector('input[name=username]').value = s.username; document.querySelector('input[name=password]').value = s.password; };
     $('#view').replaceChildren(h('div', { class: 'card', style: 'max-width:380px;margin:40px auto' },
+      demo.demo ? h('div', { class: 'card', style: 'border-color:var(--gold)' },
+        h('strong', {}, 'Demo logins'), h('div', { class: 'muted small', style: 'margin-bottom:8px' }, 'Tap one to fill in the form.'),
+        h('div', { class: 'row' }, demo.staff.map((s) => h('button', { type: 'button', class: 'small', onclick: () => fill(s) }, s.role)))) : '',
       h('h2', {}, 'Staff login'),
       h('form', { onsubmit: async (e) => {
         e.preventDefault();

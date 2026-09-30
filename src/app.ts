@@ -14,8 +14,9 @@ import { Game, type PlayerRow } from './game.ts';
 import { Accounts } from './accounts.ts';
 import { Billing } from './billing.ts';
 import { STRATEGIES, Tournaments } from './tournaments.ts';
+import { DEMO_STAFF } from './seed.ts';
 import { dispatch, openStream, type Req, Router, serveStatic, STREAMED } from './http.ts';
-import { fail, int, str } from './util.ts';
+import { fail, int, newSecret, str } from './util.ts';
 import { MARKETS, priceList } from './markets.ts';
 
 export type AppOptions = {
@@ -25,6 +26,10 @@ export type AppOptions = {
   fetchFn?: FetchFn;
   directCurrency?: string; // currency of players who sign up on GetFlop directly
   log?: (msg: string, err?: unknown) => void;
+  // Demo mode: exposes /v1/demo/* (instant play-money players, the demo staff logins).
+  demo?: boolean;
+  // Serverless hosting has no background timers: advance round/tournament clocks on each request.
+  tickOnRequest?: boolean;
 };
 
 const ROLE_RANK: Record<string, number> = { dealer: 1, supervisor: 2, admin: 3 };
@@ -177,6 +182,18 @@ export function createApp(opts: AppOptions = {}) {
     return wallet.retryNow(operatorId);
   });
 
+  // ----- demo -----
+  r.get('/v1/demo/info', () => ({ demo: !!opts.demo, staff: opts.demo ? DEMO_STAFF : [] }));
+  if (opts.demo) {
+    // One tap to play: a fresh sign-up player with 500.00 of play money.
+    r.post('/v1/demo/player', () => {
+      const n = Math.floor(Math.random() * 1e6).toString().padStart(6, '0');
+      const res = accounts.registerPlayer({ username: `guest${n}`, password: newSecret(18), displayName: `Guest ${n.slice(-4)}` });
+      accounts.cashier(res.player.id, 50_000, 'demo credit', 'system');
+      return res;
+    });
+  }
+
   // ----- operator (partner) API, HMAC-signed -----
   r.post('/v1/operator/sessions', (req) => {
     const op = operator(req);
@@ -228,13 +245,24 @@ export function createApp(opts: AppOptions = {}) {
   const publicDir = fileURLToPath(new URL('../public', import.meta.url));
   const server: Server = createServer(async (req, res) => {
     const path = (req.url ?? '/').split('?')[0];
-    if (path.startsWith('/v1/')) return dispatch(r, req, res, (e) => log('request failed', e));
+    if (path.startsWith('/v1/')) {
+      if (opts.tickOnRequest) runTicks();
+      return dispatch(r, req, res, (e) => log('request failed', e));
+    }
     if (req.method === 'GET' && (await serveStatic(publicDir, path, res))) return;
     res.writeHead(404, { 'content-type': 'text/plain' }).end('Not found');
   });
 
-  const timers: NodeJS.Timeout[] = [];
   let delivering = false;
+  function runTicks() {
+    try { game.tick(); tournaments.tick(); } catch (e) { log('tick failed', e); }
+    if (!delivering) {
+      delivering = true;
+      wallet.deliverDue().catch((e) => log('outbox failed', e)).finally(() => { delivering = false; });
+    }
+  }
+
+  const timers: NodeJS.Timeout[] = [];
   function startBackground() {
     timers.push(setInterval(() => { try { game.tick(); tournaments.tick(); } catch (e) { log('tick failed', e); } }, 250));
     timers.push(setInterval(async () => {

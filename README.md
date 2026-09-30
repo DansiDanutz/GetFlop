@@ -22,7 +22,7 @@ No frameworks and no runtime dependencies. Everything runs on what ships with No
 
 ```bash
 npm run demo     # in-memory demo with staff, a table, players and a tournament; prints the links
-npm test         # 28 tests: pricing, ledger, rounds, risk limits, seating, wallets, API, commission, tournaments
+npm test         # 30 tests: pricing, ledger, rounds, risk limits, seating, wallets, API, commission, tournaments
 npm run odds     # the price list: exact probabilities and odds at a given margin (npm run odds -- 300)
 ```
 
@@ -39,6 +39,8 @@ docker build -t getflop .
 docker run -d --name getflop -p 4000:4000 -v getflop-data:/app/data \
   -e ADMIN_USERNAME=owner -e ADMIN_PASSWORD='a-long-password' -e PUBLIC_URL=https://play.example.com getflop
 ```
+
+On Vercel (demo): the repo deploys as-is. `vercel.json` serves `public/` as static files and sends `/v1/*` to `api/index.mjs`, which runs the app in **demo mode**: an in-memory database seeded with demo data (staff logins shown on the staff screens, a "Play now" button with play money). Vercel functions have no disk and no long-running process, so demo data resets whenever Vercel recycles the function. Real use needs a persistent server (above) or a hosted database.
 
 Put it behind HTTPS (any reverse proxy, e.g. Caddy or nginx). Live updates use Server-Sent Events, so disable response buffering for `/v1/stream` and `/v1/tournaments/*/stream` if the proxy buffers.
 

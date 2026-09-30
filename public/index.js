@@ -27,3 +27,17 @@ $('#form').onsubmit = async (e) => {
     toast(err.message, true);
   }
 };
+
+call('GET', '/v1/demo/info').then((info) => {
+  if (!info.demo) return;
+  $('#demo').classList.remove('hidden');
+  $('#play-now').onclick = async () => {
+    try {
+      const res = await call('POST', '/v1/demo/player');
+      localStorage.setItem('gf.player', res.token);
+      location.href = 'play.html';
+    } catch (err) {
+      toast(err.message, true);
+    }
+  };
+}).catch(() => {});
