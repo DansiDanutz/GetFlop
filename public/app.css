@@ -72,7 +72,7 @@ table.list th { color: var(--muted); font-weight: 600; font-size: 12px; text-tra
 .pc.red { color: #c81e2b; }
 .pc.small { width: 30px; height: 42px; font-size: 13px; border-radius: 5px; }
 .pc.small .s { font-size: 13px; }
-.pc.back { background: repeating-linear-gradient(45deg, #7a1d25, #7a1d25 6px, #93262f 6px, #93262f 12px); border: 3px solid #fff; }
+.pc.back { background: url(img/card-back.svg) center / 100% 100% no-repeat; }
 .flop { display: flex; gap: 8px; }
 
 /* markets */
@@ -100,4 +100,6 @@ table.list th { color: var(--muted); font-weight: 600; font-size: 12px; text-tra
 @media (max-width: 600px) { .cardpick button { font-size: 12px; padding: 8px 0; } }
 .hero { text-align: center; padding: 40px 16px 24px; }
 .hero h1 { font-size: 34px; }
+.hero-art { display: block; width: 100%; max-width: 860px; height: auto; margin: 20px auto 0; }
+.bar .logo { height: 32px; width: auto; display: block; }
 .secret { font-family: ui-monospace, monospace; background: #000; padding: 8px; border-radius: 8px; word-break: break-all; display: block; margin: 4px 0 10px; }

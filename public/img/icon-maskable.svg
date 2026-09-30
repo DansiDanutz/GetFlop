@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-  <!-- GetFlop app mark: the three flop cards fanned on the felt, inside a gold table rail. -->
+  <!-- Full-bleed app mark for maskable (Android) and apple-touch icons: the OS rounds the corners. Generated from icon.svg. -->
   <defs>
     <radialGradient id="felt" cx="50%" cy="35%" r="75%">
       <stop offset="0" stop-color="#16614a"/><stop offset=".6" stop-color="#0d3b2e"/><stop offset="1" stop-color="#072319"/>
@@ -10,8 +10,11 @@
     <path id="diamond" d="M50 4 88 50 50 96 12 50z"/>
     <g id="card"><rect x="-78" y="-110" width="156" height="220" rx="20" fill="#fff"/></g>
   </defs>
-  <rect width="512" height="512" rx="112" fill="url(#felt)"/>
-  <rect x="22" y="22" width="468" height="468" rx="94" fill="none" stroke="#f2c14e" stroke-width="12" opacity=".9"/>
+  <rect width="512" height="512" fill="url(#felt)"/>
+  <circle cx="256" cy="256" r="200" fill="none" stroke="#f2c14e" stroke-width="10" opacity=".85"/>
+  <g transform="translate(256 256) scale(.78) translate(-256 -256)">
+  
+  
   <g filter="url(#sh)">
     <g transform="translate(168 262) rotate(-16)"><use href="#card"/><use href="#heart" fill="#d42a3a" transform="translate(-68 -92) scale(.5)"/></g>
     <g transform="translate(344 262) rotate(16)"><use href="#card"/><use href="#diamond" fill="#d42a3a" transform="translate(18 -92) scale(.5)"/></g>
@@ -20,4 +23,5 @@
   <circle cx="256" cy="420" r="30" fill="#f2c14e"/>
   <circle cx="256" cy="420" r="30" fill="none" stroke="#1d1600" stroke-width="6" stroke-dasharray="10 9.6" opacity=".55"/>
   <circle cx="256" cy="420" r="16" fill="none" stroke="#1d1600" stroke-width="3" opacity=".55"/>
+</g>
 </svg>

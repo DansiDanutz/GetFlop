@@ -1,0 +1,17 @@
+{
+  "name": "GetFlop · Bet the flop, live",
+  "short_name": "GetFlop",
+  "description": "Bet on the flop of real poker hands, dealt live. Tournaments with prize pools.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#082a20",
+  "theme_color": "#0d3b2e",
+  "icons": [
+    { "src": "/icon.svg", "type": "image/svg+xml", "sizes": "any", "purpose": "any" },
+    { "src": "/img/icon-192.png", "type": "image/png", "sizes": "192x192", "purpose": "any" },
+    { "src": "/img/icon-512.png", "type": "image/png", "sizes": "512x512", "purpose": "any" },
+    { "src": "/img/icon-maskable-512.png", "type": "image/png", "sizes": "512x512", "purpose": "maskable" }
+  ]
+}
