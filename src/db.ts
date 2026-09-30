@@ -201,6 +201,15 @@ CREATE TABLE IF NOT EXISTS tournament_bets (
 );
 CREATE INDEX IF NOT EXISTS tbets_by_round ON tournament_bets (round_id, status);
 
+-- Commission rate history, so an invoice always uses the rate that was agreed for its period.
+CREATE TABLE IF NOT EXISTS commission_rates (
+  operator_id TEXT NOT NULL REFERENCES operators(id),
+  bps INTEGER NOT NULL,
+  effective_from INTEGER NOT NULL,
+  set_by TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS rates_by_operator ON commission_rates (operator_id, effective_from);
+
 CREATE TABLE IF NOT EXISTS invoices (
   id TEXT PRIMARY KEY,
   operator_id TEXT NOT NULL REFERENCES operators(id),

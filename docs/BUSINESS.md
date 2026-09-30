@@ -19,7 +19,7 @@ Live flop betting on real dealer-dealt poker hands, from our own poker club, and
 
 ## Risk controls (money)
 
-- **Per-bet limits** per table: min stake, max stake, max payout per bet.
+- **Per-bet limits** per table: min stake, max stake, max payout per bet. All table limits are amounts in the player's currency and apply to each currency separately (a 1,000.00 cap means up to 1,000.00 EUR *and* 1,000.00 USD on one hand). There is deliberately no currency conversion; if a table takes several currencies, set the limits for the riskiest one.
 - **Per-hand liability cap.** For every open hand we know, for each of the 22,100 flops, exactly what the house would pay. A bet is refused if the worst flop would cost more than the table's cap. Bets on opposite outcomes offset each other, so the cap limits real risk and doesn't just count stakes.
 - **Double-entry ledger.** Every movement is balanced; Admin → Audit & integrity proves that balances equal entries and every currency sums to zero.
 - **Idempotency everywhere.** Partner deposits, withdrawals and wallet calls carry transaction IDs; retries never double-pay.

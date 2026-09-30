@@ -10,6 +10,11 @@
 // Risk control: for every open round we keep, per currency, the total payout the house would owe
 // on each of the 22,100 possible flops. A bet is refused if the worst flop would cost the house
 // more than the table's max_round_liability.
+//
+// Table limits (min/max stake, max payout per bet, max round liability) are amounts in the
+// player's own currency and apply to each currency separately: a table with a 10,000 cap
+// risks at most 100.00 EUR and 100.00 USD on one hand, never a converted total. There are no
+// exchange rates in the system on purpose; set limits with the table's currencies in mind.
 
 import { type Flop, flopIndex, formatCard, parseFlop } from './cards.ts';
 import { MARKETS, payoutFor, priceList, priceX100, TOTAL_FLOPS } from './markets.ts';
@@ -161,8 +166,8 @@ export class Game {
       const round = this.currentRound(tableId);
       let n = 0;
       if (round) {
-        if (this.db.get("SELECT 1 FROM bets WHERE round_id = ? AND player_id = ? AND status = 'pending'", round.id, playerId))
-          fail(409, 'BETS_PENDING', 'Wallet confirmations are still in flight, retry in a moment');
+        // A bet whose wallet debit is still in flight is refunded by placeBet as soon as the
+        // debit confirms, because by then the seat below is already recorded.
         const bets = this.db.all(
           "SELECT b.*, o.wallet_mode, p.external_id FROM bets b JOIN operators o ON o.id = b.operator_id JOIN players p ON p.id = b.player_id WHERE b.round_id = ? AND b.player_id = ? AND b.status = 'open'",
           round.id, playerId,
@@ -391,6 +396,7 @@ export class Game {
     const payout = payoutFor(stake, odds);
     if (payout > t.max_bet_payout) fail(400, 'PAYOUT_LIMIT', `Maximum payout per bet is ${t.max_bet_payout}`);
 
+    // Liability is capped per currency (see the note at the top of this file).
     const exposure = this.exposureFor(r.id, op.currency);
     if (worstCaseAfter(exposure, market.wins, stake, payout) > t.max_round_liability)
       fail(409, 'TABLE_LIMIT_REACHED', 'This market is full for this round, try a smaller stake or another market');
@@ -416,12 +422,20 @@ export class Game {
         txId: `${bet.id}:debit`, playerId: player.external_id, amount: stake, currency: op.currency, roundId: r.id, betId: bet.id, marketId: market.id,
       });
       if (res.ok) {
+        // The player may have been checked in at this table while the debit was in flight.
+        const seatedNow = this.seatOf(player.id) === r.table_id;
+        if (seatedNow) applyExposure(this.exposureFor(r.id, op.currency), market.wins, stake, payout, -1);
         this.db.tx(() => {
           this.db.run("UPDATE bets SET status = 'open' WHERE id = ?", bet.id);
           this.ledger.transfer('bet', bet.id, op.currency, `seamless:${op.id}`, `escrow:${r.id}`, stake);
+          if (seatedNow) {
+            this.refund({ ...bet, external_id: player.external_id }, r.id, this.now());
+            this.audit.log('system', 'bet.refund_seated', { betId: bet.id, playerId: player.id, tableId: r.table_id });
+          }
         });
+        if (seatedNow) this.assertNotSeated(r.table_id, player.id);
       } else {
-        applyExposure(exposure, market.wins, stake, payout, -1);
+        applyExposure(this.exposureFor(r.id, op.currency), market.wins, stake, payout, -1);
         this.db.tx(() => {
           this.db.run("UPDATE bets SET status = 'rejected' WHERE id = ?", bet.id);
           if (res.uncertain)

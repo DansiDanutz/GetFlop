@@ -58,7 +58,7 @@ POST /v1/operator/players/withdraw  { "playerId": "u1", "amount": 2000, "txId": 
 POST /v1/operator/players/balance   { "playerId": "u1" }
 ```
 
-Amounts are integers in minor units (cents). A repeated `txId` is applied once and returns the current balance, so retrying is always safe.
+Amounts are integers in minor units (cents). One `txId` identifies one transfer: a retry with the same player, direction and amount is applied once and returns the current balance, so retrying is always safe. Reusing a `txId` for a different transfer returns `409 TX_ID_REUSED`.
 
 ### Seamless wallet (players keep one balance, in your system)
 
@@ -73,14 +73,15 @@ You expose four endpoints under your `walletUrl`. We call them with the same sig
 
 Rules:
 
-- **Every call is idempotent on `txId`.** We retry credits and rollbacks until you answer 2xx (backoff from 2 s up to 10 min, 25 attempts, then it's flagged to our admins).
+- **Every call is idempotent on `txId`.** We retry credits and rollbacks until you answer 2xx: backoff from 2 s up to 10 min, and it never stops (a win is owed until it is paid). After 25 attempts our admins are alerted and can trigger an immediate retry once your wallet is back.
 - Answer debits within **3 seconds**. On timeout we refuse the bet and send a rollback.
 - A 4xx on debit means "refused" and nothing is retried. A 5xx or timeout means "unknown", so we send a rollback.
 
 ## 5. Reconciliation and reporting
 
 ```
-GET /v1/operator/bets?from=<ms>&to=<ms>&limit=1000     every bet of your players, oldest first
+GET /v1/operator/bets?from=<ms>&to=<ms>&limit=1000     every bet of your players, oldest first, paged:
+                                                       { bets: [...], nextCursor } - repeat with &cursor=<nextCursor> until it is null
 GET /v1/operator/reports/ggr?from=<ms>&to=<ms>         stakes, payouts, GGR, commission estimate
 GET /v1/operator/invoices                              issued invoices
 GET /v1/operator/tables                                live tables for your lobby
@@ -92,3 +93,7 @@ Bet statuses: `open` (in play), `won`, `lost`, `refunded` (hand voided), `reject
 ## 6. Commission
 
 `GGR = stakes lost − winnings paid`, over settled bets. Commission = your agreed % of positive GGR. A negative period is carried into the next one and must be recovered before commission is due again. Invoices show the carry in and carry out.
+
+Invoice periods are back to back: each starts exactly where the previous one ended, so every bet is billed once. A rate change applies from the moment it is made; a period is always charged the rate that was agreed during it (we invoice up to the change first).
+
+Table limits (stakes, maximum payout per bet, maximum house loss per hand) are amounts in each player's own currency and apply to each currency separately.

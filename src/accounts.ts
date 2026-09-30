@@ -40,6 +40,7 @@ export class Accounts {
       'INSERT INTO operators (id, name, currency, wallet_mode, wallet_url, api_key, secret, commission_bps, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
       id, name, currency, walletMode, walletUrl, apiKey, secret, commissionBps, this.now(),
     );
+    this.recordRate(id, commissionBps, actor);
     this.audit.log(actor, 'operator.create', { operatorId: id, name, currency, walletMode, commissionBps });
     // The secret is shown once. Afterwards only rotateSecret() can reveal a new one.
     return { ...publicOperator(this.operator(id)), apiKey, secret };
@@ -52,8 +53,14 @@ export class Accounts {
     const commissionBps = input.commissionBps === undefined ? op.commission_bps : int(input.commissionBps, 'commissionBps', 0, 10_000);
     const walletUrl = input.walletUrl === undefined ? op.wallet_url : optStr(input.walletUrl, 'walletUrl', 500);
     this.db.run('UPDATE operators SET status = ?, commission_bps = ?, wallet_url = ? WHERE id = ?', status, commissionBps, walletUrl, id);
+    if (commissionBps !== op.commission_bps) this.recordRate(id, commissionBps, actor);
     this.audit.log(actor, 'operator.update', { operatorId: id, status, commissionBps, walletUrl });
     return publicOperator(this.operator(id));
+  }
+
+  // A new rate applies from now on. Periods that already ended keep the rate they had.
+  private recordRate(operatorId: string, bps: number, actor: string) {
+    this.db.run('INSERT INTO commission_rates (operator_id, bps, effective_from, set_by) VALUES (?, ?, ?, ?)', operatorId, bps, this.now(), actor);
   }
 
   rotateSecret(id: string, actor: string) {
@@ -117,10 +124,17 @@ export class Accounts {
     if (op.wallet_mode !== 'transfer') fail(409, 'WRONG_WALLET_MODE', 'This operator uses a seamless wallet');
     const player = this.playerByExternal(op, input.playerId);
     const amount = int(input.amount, 'amount', 1);
+    // One txId = one transfer, whatever its direction. A retry with the same details is answered
+    // without moving money again; reusing the id for anything else is refused.
     const ref = `${op.id}:${str(input.txId, 'txId', 100)}`;
-    if (!this.ledger.findTx(direction, ref)) {
-      const [from, to] = direction === 'deposit' ? [`operator:${op.id}`, `player:${player.id}`] : [`player:${player.id}`, `operator:${op.id}`];
-      this.ledger.transfer(direction, ref, op.currency, from, to, amount);
+    const signed = direction === 'deposit' ? amount : -amount;
+    const prior = this.ledger.findTx('operator.transfer', ref);
+    if (prior) {
+      const entry = this.db.get<{ amount: number }>('SELECT amount FROM ledger_entries WHERE tx_id = ? AND account = ?', prior.id, `player:${player.id}`);
+      if (entry?.amount !== signed)
+        fail(409, 'TX_ID_REUSED', 'This txId was already used for a different transfer (player, direction or amount)');
+    } else {
+      this.ledger.transfer('operator.transfer', ref, op.currency, `operator:${op.id}`, `player:${player.id}`, signed);
     }
     return { playerId: player.external_id, balance: this.ledger.balance(`player:${player.id}`, op.currency), currency: op.currency };
   }
@@ -136,6 +150,7 @@ export class Accounts {
       "INSERT INTO operators (id, name, currency, wallet_mode, api_key, secret, commission_bps, created_at) VALUES ('op_direct', 'GetFlop Direct', ?, 'transfer', ?, ?, 0, ?)",
       currency, `gfk_${newSecret(18)}`, newSecret(32), this.now(),
     );
+    this.recordRate('op_direct', 0, 'system');
     return this.operator('op_direct');
   }
 

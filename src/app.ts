@@ -169,9 +169,12 @@ export function createApp(opts: AppOptions = {}) {
   r.post('/v1/admin/invoices', (req) => billing.createInvoice(str(req.body.operatorId, 'operatorId'), req.body.from, req.body.to, staff(req, 'admin').actor));
   r.get('/v1/admin/audit', (req) => { staff(req, 'supervisor'); return audit.list(200, req.query.get('action') ?? undefined); });
   r.get('/v1/admin/integrity', (req) => { staff(req, 'admin'); return { ledger: ledger.verify(), audit: audit.verify() }; });
-  r.get('/v1/admin/outbox', (req) => {
-    staff(req, 'admin');
-    return db.all('SELECT * FROM outbox WHERE status = ? ORDER BY created_at DESC LIMIT 200', req.query.get('status') ?? 'failed');
+  r.get('/v1/admin/outbox', (req) => { staff(req, 'admin'); return wallet.stuck(); });
+  r.post('/v1/admin/outbox/retry', (req) => {
+    const s = staff(req, 'admin');
+    const operatorId = req.body.operatorId ? str(req.body.operatorId, 'operatorId', 64) : undefined;
+    audit.log(s.actor, 'outbox.retry_now', { operatorId: operatorId ?? 'all' });
+    return wallet.retryNow(operatorId);
   });
 
   // ----- operator (partner) API, HMAC-signed -----
@@ -191,18 +194,33 @@ export function createApp(opts: AppOptions = {}) {
     const op = operator(req);
     return { playerId: req.body.playerId, ...(await balanceOf(accounts.playerByExternal(op, req.body.playerId))) };
   });
-  // Reconciliation feed: every bet of this operator placed in [from, to), oldest first.
+  // Reconciliation feed: every bet of this operator placed in [from, to), oldest first, in pages.
+  // Pass the returned nextCursor to get the next page; it is null on the last page.
   r.get('/v1/operator/bets', (req) => {
     const op = operator(req);
     const { from, to } = range(req);
-    const limit = Math.min(Number(req.query.get('limit') ?? 500) || 500, 1000);
-    return db.all(
+    const limit = Math.min(Math.max(Number(req.query.get('limit') ?? 500) || 500, 1), 1000);
+    let after = { at: -1, id: '' };
+    const cursor = req.query.get('cursor');
+    if (cursor) {
+      const m = /^(\d+):(bet_[\w-]+)$/.exec(Buffer.from(cursor, 'base64url').toString());
+      if (!m) fail(400, 'BAD_CURSOR');
+      after = { at: Number(m![1]), id: m![2] };
+    }
+    const rows = db.all(
       `SELECT b.id, p.external_id AS playerId, b.round_id AS roundId, r.number AS roundNumber, r.table_id AS tableId, b.market_id AS marketId,
               b.currency, b.stake, b.odds_x100 AS oddsX100, b.status, b.payout, b.placed_at AS placedAt, b.settled_at AS settledAt, r.flop
        FROM bets b JOIN players p ON p.id = b.player_id JOIN rounds r ON r.id = b.round_id
-       WHERE b.operator_id = ? AND b.placed_at >= ? AND b.placed_at < ? ORDER BY b.placed_at LIMIT ?`,
-      op.id, from, to, limit,
-    ).map((b) => ({ ...b, flop: b.flop ? JSON.parse(b.flop) : null }));
+       WHERE b.operator_id = ? AND b.placed_at >= ? AND b.placed_at < ? AND (b.placed_at > ? OR (b.placed_at = ? AND b.id > ?))
+       ORDER BY b.placed_at, b.id LIMIT ?`,
+      op.id, from, to, after.at, after.at, after.id, limit + 1,
+    );
+    const page = rows.slice(0, limit);
+    const lastRow = page.at(-1);
+    return {
+      bets: page.map((b) => ({ ...b, flop: b.flop ? JSON.parse(b.flop) : null })),
+      nextCursor: rows.length > limit && lastRow ? Buffer.from(`${lastRow.placedAt}:${lastRow.id}`).toString('base64url') : null,
+    };
   });
   r.get('/v1/operator/reports/ggr', (req) => { const op = operator(req); const { from, to } = range(req); return billing.report(from, to, op.id); });
   r.get('/v1/operator/invoices', (req) => billing.listInvoices(operator(req).id));

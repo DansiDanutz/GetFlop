@@ -38,29 +38,49 @@ export class Billing {
     });
   }
 
-  // Closes a billing period for one operator. Periods must follow each other without overlap.
+  // Closes a billing period for one operator. Periods are contiguous: each one starts exactly
+  // where the previous one ended (the first starts when the partner was created), so every
+  // settled bet is billed exactly once. `from` may be omitted; if given it must match.
+  // A period may not span a commission rate change: invoice up to the change first, so each
+  // period is charged the rate that was agreed for it.
   createInvoice(operatorId: string, fromInput: unknown, toInput: unknown, actor: string) {
     const op = this.db.get('SELECT * FROM operators WHERE id = ?', operatorId) ?? fail(404, 'OPERATOR_NOT_FOUND');
-    const from = int(fromInput, 'from');
-    const to = int(toInput, 'to');
-    if (to <= from) fail(400, 'BAD_INPUT', 'to must be after from');
-    if (to > this.now()) fail(400, 'PERIOD_NOT_OVER', 'Only past periods can be invoiced');
     const last = this.db.get('SELECT * FROM invoices WHERE operator_id = ? ORDER BY period_to DESC LIMIT 1', operatorId);
-    if (last && from < last.period_to) fail(409, 'PERIOD_OVERLAP', `Last invoice ends at ${last.period_to}`);
+    const from: number = last?.period_to ?? op.created_at;
+    if (fromInput !== undefined && fromInput !== null && int(fromInput, 'from') !== from)
+      fail(409, 'PERIOD_NOT_CONTIGUOUS', `The next invoice for this partner must start at ${from}`);
+    const to = int(toInput, 'to');
+    if (to <= from) fail(400, 'BAD_INPUT', `to must be after ${from}`);
+    if (to > this.now()) fail(400, 'PERIOD_NOT_OVER', 'Only past periods can be invoiced');
+    const change = this.db.get(
+      'SELECT effective_from FROM commission_rates WHERE operator_id = ? AND effective_from > ? AND effective_from < ? ORDER BY effective_from LIMIT 1',
+      operatorId, from, to,
+    );
+    if (change) fail(409, 'RATE_CHANGED_IN_PERIOD', `The commission rate changed at ${change.effective_from}. Invoice up to that time first.`);
+    const bps: number = this.db.get(
+      'SELECT bps FROM commission_rates WHERE operator_id = ? AND effective_from <= ? ORDER BY effective_from DESC, rowid DESC LIMIT 1',
+      operatorId, from,
+    )?.bps ?? op.commission_bps;
 
     const totals = this.report(from, to, operatorId).find((r) => r.currency === op.currency) ?? { bets: 0, stakes: 0, payouts: 0, ggr: 0 };
     const carryIn = last?.carry_out ?? 0;
     const base = totals.ggr + carryIn;
-    const commission = base > 0 ? Math.floor((base * op.commission_bps) / 10_000) : 0;
+    const commission = base > 0 ? Math.floor((base * bps) / 10_000) : 0;
     const carryOut = base < 0 ? base : 0;
     const id = newId('inv');
     this.db.run(
       `INSERT INTO invoices (id, operator_id, currency, period_from, period_to, bets, stakes, payouts, ggr, carry_in, commission_base, commission_bps, commission, carry_out, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      id, operatorId, op.currency, from, to, totals.bets, totals.stakes, totals.payouts, totals.ggr, carryIn, Math.max(base, 0), op.commission_bps, commission, carryOut, this.now(),
+      id, operatorId, op.currency, from, to, totals.bets, totals.stakes, totals.payouts, totals.ggr, carryIn, Math.max(base, 0), bps, commission, carryOut, this.now(),
     );
-    this.audit.log(actor, 'invoice.create', { invoiceId: id, operatorId, from, to, ggr: totals.ggr, commission, carryOut });
+    this.audit.log(actor, 'invoice.create', { invoiceId: id, operatorId, from, to, ggr: totals.ggr, commissionBps: bps, commission, carryOut });
     return this.invoice(id);
+  }
+
+  // When the next invoice for this partner would start (for the admin screen).
+  nextInvoiceStart(operatorId: string): number {
+    const op = this.db.get('SELECT created_at FROM operators WHERE id = ?', operatorId) ?? fail(404, 'OPERATOR_NOT_FOUND');
+    return this.db.get('SELECT MAX(period_to) AS t FROM invoices WHERE operator_id = ?', operatorId)?.t ?? op!.created_at;
   }
 
   invoice(id: string) {

@@ -235,7 +235,7 @@ export class Tournaments {
     const t = this.get(tournamentId);
     const rules = JSON.parse(t.rules);
     const strategy = STRATEGIES.get(t.strategy)!;
-    if (player.status !== 'active') fail(403, 'PLAYER_BLOCKED');
+    this.assertCanPlay(player);
     if (this.entry(tournamentId, player.id)) fail(409, 'ALREADY_JOINED');
     const canJoin = t.status === 'scheduled' || (t.status === 'running' && rules.lateJoin !== false && this.now() < t.ends_at);
     if (!canJoin) fail(409, 'REGISTRATION_CLOSED');
@@ -262,6 +262,7 @@ export class Tournaments {
       if (prior) return this.view(tournamentId, player.id);
     }
     if (t.status !== 'running' || this.now() >= t.ends_at) fail(409, 'TOURNAMENT_NOT_RUNNING');
+    this.assertCanPlay(player);
     const entry = this.entry(tournamentId, player.id) ?? fail(409, 'NOT_JOINED');
     const round = this.game.round(str(input.roundId, 'roundId', 64));
     if (round.status !== 'open' || this.now() >= round.closes_at) fail(409, 'BETTING_CLOSED');
@@ -303,6 +304,14 @@ export class Tournaments {
       if (payout) this.db.run('UPDATE tournament_entries SET points = points + ? WHERE tournament_id = ? AND player_id = ?', payout, b.tournament_id, b.player_id);
     }
     queueMicrotask(() => touched.forEach((id) => this.publish(id)));
+  }
+
+  // Same eligibility as cash betting: a blocked player or a suspended partner's player cannot play.
+  private assertCanPlay(player: PlayerRow) {
+    const op = this.db.get<{ status: string }>('SELECT status FROM operators WHERE id = ?', player.operator_id);
+    if (op?.status !== 'active') fail(403, 'OPERATOR_SUSPENDED');
+    const fresh = this.db.get<{ status: string }>('SELECT status FROM players WHERE id = ?', player.id);
+    if (fresh?.status !== 'active') fail(403, 'PLAYER_BLOCKED');
   }
 
   // A player who sits down at the table gets this hand's tournament bets back (points and bet count).

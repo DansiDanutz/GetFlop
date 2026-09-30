@@ -33,8 +33,9 @@ test('operator API: signed requests, launch sessions, transfers and reconciliati
   assert.equal(view.body.round.betsByMarket.ALL_RED, 1);
 
   const bets = await call('GET', '/v1/operator/bets?from=0');
-  assert.equal(bets.body.length, 1);
-  assert.equal(bets.body[0].playerId, 'u1');
+  assert.equal(bets.body.bets.length, 1);
+  assert.equal(bets.body.bets[0].playerId, 'u1');
+  assert.equal(bets.body.nextCursor, null);
 
   const withdraw = await call('POST', '/v1/operator/players/withdraw', { playerId: 'u1', amount: 9000, txId: 'w1' });
   assert.equal(withdraw.body.error, 'INSUFFICIENT_FUNDS');
@@ -94,7 +95,7 @@ test('commission invoices carry losing periods forward', async () => {
 
   for (let i = 0; i < 5; i++) await play('RAINBOW', 100_000, ['Ah', 'Kh', '2c']); // player loses 500,000
   s.advance(DAY);
-  await assert.rejects(async () => s.app.billing.createInvoice(s.op.id, start, s.clock.t, s.admin), { code: 'PERIOD_OVERLAP' });
+  await assert.rejects(async () => s.app.billing.createInvoice(s.op.id, start, s.clock.t, s.admin), { code: 'PERIOD_NOT_CONTIGUOUS' });
   const inv2 = s.app.billing.createInvoice(s.op.id, inv1.period_to, s.clock.t, s.admin);
   assert.equal(inv2.ggr, 500_000);
   assert.equal(inv2.commission_base, 500_000 - 402_750);

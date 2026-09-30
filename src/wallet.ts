@@ -5,7 +5,9 @@
 //   POST {walletUrl}/rollback  undo a debit we could not confirm (timeout) -> 200 (idempotent)
 //   POST {walletUrl}/balance   read a balance          -> 200 { balance }
 // Credits and rollbacks go through the outbox: they are written in the same database
-// transaction as the settlement and retried until the operator acknowledges them.
+// transaction as the settlement and retried until the operator acknowledges them. Retrying
+// never stops (a win or refund is owed until it is delivered); after ALERT_AFTER attempts the
+// message is flagged to admins, who can also force an immediate retry.
 
 import type { Db } from './db.ts';
 import type { Audit } from './audit.ts';
@@ -24,7 +26,8 @@ export type FetchFn = (url: string, init: { method: string; headers: Record<stri
   Promise<{ status: number; text(): Promise<string> }>;
 
 const TIMEOUT_MS = 3_000;
-const MAX_ATTEMPTS = 25;
+const ALERT_AFTER = 25;
+const MAX_BACKOFF_MS = 600_000;
 
 export class SeamlessWallet {
   private db: Db;
@@ -73,6 +76,19 @@ export class SeamlessWallet {
     );
   }
 
+  // Messages that have not been acknowledged after many attempts, for the admin screen.
+  stuck() {
+    return this.db.all("SELECT * FROM outbox WHERE status = 'pending' AND attempts >= ? ORDER BY created_at LIMIT 200", ALERT_AFTER);
+  }
+
+  // Admin action once the partner says their wallet is back: try now instead of waiting for backoff.
+  retryNow(operatorId?: string) {
+    const res = operatorId
+      ? this.db.run("UPDATE outbox SET next_attempt_at = ? WHERE status = 'pending' AND operator_id = ?", this.now(), operatorId)
+      : this.db.run("UPDATE outbox SET next_attempt_at = ? WHERE status = 'pending'", this.now());
+    return { scheduled: Number(res.changes) };
+  }
+
   // Delivers due outbox messages. Backoff: 2s, 4s, 8s ... capped at 10 minutes.
   async deliverDue(limit = 50) {
     const due = this.db.all(
@@ -89,11 +105,10 @@ export class SeamlessWallet {
       if (res.ok) {
         this.db.run("UPDATE outbox SET status = 'done', attempts = ?, last_error = NULL WHERE id = ?", attempts, row.id);
         delivered++;
-      } else if (attempts >= MAX_ATTEMPTS) {
-        this.db.run("UPDATE outbox SET status = 'failed', attempts = ?, last_error = ? WHERE id = ?", attempts, res.code, row.id);
-        this.audit.log('system', 'outbox.failed', { outboxId: row.id, operatorId: row.operator_id, action: row.action, error: res.code });
       } else {
-        const delay = Math.min(2_000 * 2 ** (attempts - 1), 600_000);
+        if (attempts === ALERT_AFTER)
+          this.audit.log('system', 'outbox.stuck', { outboxId: row.id, operatorId: row.operator_id, action: row.action, error: res.code });
+        const delay = Math.min(2_000 * 2 ** Math.min(attempts - 1, 20), MAX_BACKOFF_MS);
         this.db.run('UPDATE outbox SET attempts = ?, last_error = ?, next_attempt_at = ? WHERE id = ?', attempts, res.code, this.now() + delay, row.id);
       }
     }

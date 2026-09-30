@@ -31,7 +31,7 @@ async function tables(el) {
   el.append(
     h('div', { class: 'card' }, h('h2', {}, 'Tables'),
       h('table', { class: 'list' },
-        h('tr', {}, h('th', {}, 'Name'), h('th', {}, 'Status'), h('th', { class: 'num' }, 'Margin'), h('th', { class: 'num' }, 'Stake'), h('th', { class: 'num' }, 'Max round risk'), h('th', { class: 'num' }, 'Betting'), h('th', {}, '')),
+        h('tr', {}, h('th', {}, 'Name'), h('th', {}, 'Status'), h('th', { class: 'num' }, 'Margin'), h('th', { class: 'num' }, 'Stake'), h('th', { class: 'num' }, 'Max hand risk / currency'), h('th', { class: 'num' }, 'Betting'), h('th', {}, '')),
         list.map((t) => h('tr', {}, h('td', {}, t.name, t.dualConfirm ? h('span', { class: 'muted small' }, ' · dual confirm') : ''), h('td', {}, h('span', { class: 'pill' }, t.status)),
           h('td', { class: 'num' }, `${t.marginBps / 100}%`), h('td', { class: 'num' }, `${money(t.minStake)}–${money(t.maxStake)}`), h('td', { class: 'num' }, money(t.maxRoundLiability)), h('td', { class: 'num' }, `${t.bettingSeconds}s`),
           h('td', {}, h('button', { class: 'small', onclick: async () => { await call('PATCH', `/v1/admin/tables/${t.id}`, { status: t.status === 'active' ? 'inactive' : 'active' }); show('tables'); } }, t.status === 'active' ? 'Deactivate' : 'Activate')))))),
@@ -39,10 +39,10 @@ async function tables(el) {
       form([
         field('Name', 'name', { required: true, placeholder: 'Table 2 · NLH 1/2' }),
         field('House margin %', 'margin', { type: 'number', step: '0.1', value: '5' }),
-        field('Min stake', 'minStake', { type: 'number', step: '0.01', value: '1' }),
-        field('Max stake', 'maxStake', { type: 'number', step: '0.01', value: '500' }),
-        field('Max payout per bet', 'maxBetPayout', { type: 'number', step: '0.01', value: '10000' }),
-        field('Max house loss per hand', 'maxRoundLiability', { type: 'number', step: '0.01', value: '50000' }),
+        field('Min stake (per currency)', 'minStake', { type: 'number', step: '0.01', value: '1' }),
+        field('Max stake (per currency)', 'maxStake', { type: 'number', step: '0.01', value: '500' }),
+        field('Max payout per bet (per currency)', 'maxBetPayout', { type: 'number', step: '0.01', value: '10000' }),
+        field('Max house loss per hand (per currency)', 'maxRoundLiability', { type: 'number', step: '0.01', value: '50000' }),
         field('Betting window (seconds)', 'bettingSeconds', { type: 'number', value: '45' }),
         field('Flop confirmation', 'dualConfirm', { options: [['0', 'Dealer only'], ['1', 'Dealer + 2nd person']] }),
         field('Video stream URL (optional)', 'streamUrl', { placeholder: 'https://…' }),
@@ -171,8 +171,8 @@ async function reports(el) {
         h('td', { class: 'num' }, money(x.payouts, x.currency)), h('td', { class: 'num' }, money(x.ggr, x.currency)), h('td', { class: 'num' }, `${(x.holdPct * 100).toFixed(1)}%`),
         h('td', { class: 'num' }, `${money(x.commissionIfInvoiced, x.currency)} (${x.commissionBps / 100}%)`),
         h('td', {}, x.operatorId === 'op_direct' ? '' : h('button', { class: 'small', onclick: async () => {
-          try { const inv = await call('POST', '/v1/admin/invoices', { operatorId: x.operatorId, from: f, to: Math.min(t, Date.now()) }); toast(`Invoice: ${money(inv.commission, inv.currency)}`); invoices(); } catch (e) { toast(e.message, true); }
-        } }, 'Invoice period'))))));
+          try { const inv = await call('POST', '/v1/admin/invoices', { operatorId: x.operatorId, to: Math.min(t, Date.now()) }); toast(`Invoice: ${money(inv.commission, inv.currency)}`); invoices(); } catch (e) { toast(e.message, true); }
+        } }, 'Invoice up to end date'))))));
   };
   const invBox = h('div', {});
   const invoices = async () => {
@@ -186,7 +186,7 @@ async function reports(el) {
     h('div', { class: 'card' }, h('h2', {}, 'GGR and commission by partner'),
       h('form', { class: 'row', style: 'margin-bottom:12px', onsubmit: (e) => { e.preventDefault(); run(ts(e.target.f.value), ts(e.target.t.value)).catch((x) => toast(x.message, true)); } },
         h('input', { name: 'f', type: 'datetime-local', value: localInput(from), style: 'width:auto' }), h('input', { name: 't', type: 'datetime-local', value: localInput(to), style: 'width:auto' }), h('button', {}, 'Show')),
-      out, h('p', { class: 'muted small' }, 'GGR = stakes lost minus winnings paid. Losing periods are carried forward into the next invoice.')),
+      out, h('p', { class: 'muted small' }, 'GGR = stakes lost minus winnings paid. Losing periods are carried forward into the next invoice. Each invoice starts where the previous one ended; if a partner\'s rate changed, invoice up to the change first.')),
     h('div', { class: 'card' }, h('h2', {}, 'Invoices'), invBox),
   );
   await Promise.all([run(from, to), invoices()]);
@@ -194,12 +194,15 @@ async function reports(el) {
 
 // ---------- integrity ----------
 async function integrity(el) {
-  const [check, log, outbox] = await Promise.all([call('GET', '/v1/admin/integrity'), call('GET', '/v1/admin/audit'), call('GET', '/v1/admin/outbox?status=failed')]);
+  const [check, log, outbox] = await Promise.all([call('GET', '/v1/admin/integrity'), call('GET', '/v1/admin/audit'), call('GET', '/v1/admin/outbox')]);
   el.append(
     h('div', { class: 'card' }, h('h2', {}, 'Integrity'),
       h('p', {}, check.ledger.ok ? '✅ Ledger balances: every account matches its entries, every currency sums to zero.' : '❌ Ledger mismatch: ' + JSON.stringify(check.ledger)),
       h('p', {}, check.audit.ok ? `✅ Audit chain intact (${check.audit.records} records).` : `❌ Audit chain broken at record ${check.audit.brokenAt}.`),
-      h('p', {}, outbox.length ? `⚠️ ${outbox.length} wallet messages to partners failed after all retries.` : '✅ No failed wallet messages.')),
+      outbox.length
+        ? h('p', {}, `⚠️ ${outbox.length} payments to partner wallets (wins, refunds, rollbacks) are not acknowledged after many attempts. They keep retrying every 10 minutes. `,
+            h('button', { class: 'small', onclick: async () => { const r = await call('POST', '/v1/admin/outbox/retry', {}); toast(`Retrying ${r.scheduled} now`); show('integrity'); } }, 'Retry all now'))
+        : h('p', {}, '✅ Every payment to partner wallets has been delivered or is on its normal retry schedule.')),
     h('div', { class: 'card' }, h('h2', {}, 'Audit log (latest 200)'),
       h('table', { class: 'list' }, h('tr', {}, h('th', {}, 'When'), h('th', {}, 'Who'), h('th', {}, 'Action'), h('th', {}, 'Details')),
         log.map((a) => h('tr', {}, h('td', { class: 'small' }, time(a.at)), h('td', {}, a.actor), h('td', {}, a.action), h('td', { class: 'small muted' }, JSON.stringify(a.data)))))),
