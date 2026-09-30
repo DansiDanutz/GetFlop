@@ -17,7 +17,7 @@ import type { Audit } from './audit.ts';
 import type { Events } from './events.ts';
 import type { Game } from './game.ts';
 import { VISION_MODEL, type FlopReading, type VisionFn } from './vision.ts';
-import { AppError, fail, newId } from './util.ts';
+import { AppError, fail, newId, sha256 } from './util.ts';
 import { parseFlop, formatCard } from './cards.ts';
 
 export const CAMERA_MODES = ['off', 'assist', 'auto'] as const;
@@ -120,34 +120,45 @@ export class Camera {
     }
 
     const cards = trusted(reading);
+    const picture = sha256(data);
     const decided = await this.db.tx(async () => {
       await this.db.exclusive(CAMERA_LOCK);
       const now = await this.game.round(roundId);
-      if (now.status !== 'closed') return { outcome: 'late' as const, now };
+      if (now.status !== 'closed') return { outcome: 'late' as const, now, mode };
+      // The mode as it is now: an admin may have changed it while the picture was being read.
+      const modeNow = (await this.status(r.table_id)).mode;
+      if (modeNow === 'off') return { outcome: 'off' as const, now, mode: modeNow };
+      // A picture already used for an earlier hand at this table is never trusted.
+      const replayed = await this.db.get('SELECT 1 FROM flop_readings WHERE table_id = ? AND image_hash = ? AND round_id != ? LIMIT 1', r.table_id, picture, roundId);
       const prev = await this.db.get(
-        "SELECT cards, outcome FROM flop_readings WHERE round_id = ? AND outcome != 'error' ORDER BY seq DESC LIMIT 1", roundId);
-      const agreed = !!cards && !!prev?.cards && ['read', 'agreed'].includes(prev.outcome) && sameCards(JSON.parse(prev.cards), cards);
-      const outcome = !cards ? (reading.visible ? 'unsure' : 'no_flop') : agreed ? 'agreed' : 'read';
-      const id = await this.record(r, cards ?? (reading.cards.length ? reading.cards : null), outcome, reading.note, agreed ? data : null, by, reading.confidence);
+        "SELECT cards, outcome, image_hash FROM flop_readings WHERE round_id = ? AND outcome IN ('read', 'agreed', 'unsure', 'no_flop') ORDER BY seq DESC LIMIT 1", roundId);
+      // Agreement needs two different pictures naming the same three cards.
+      const agreed = !!cards && !replayed && !!prev?.cards && ['read', 'agreed'].includes(prev.outcome)
+        && prev.image_hash !== picture && sameCards(JSON.parse(prev.cards), cards);
+      const outcome = replayed ? 'replayed' : !cards ? (reading.visible ? 'unsure' : 'no_flop') : agreed ? 'agreed' : 'read';
+      const id = await this.record(r, cards ?? (reading.cards.length ? reading.cards : null), outcome, reading.note, agreed ? data : null, by, reading.confidence, picture);
       if (agreed) await this.audit.log(CAMERA_ACTOR, 'camera.flop_read', { roundId, tableId: r.table_id, cards, confidence: reading.confidence, readingId: id });
-      return { outcome, now };
+      return { outcome, now, mode: modeNow };
     });
 
     const base = { cards: reading.cards, confidence: reading.confidence, note: reading.note };
     if (decided.outcome === 'late') return { state: 'done' as const };
+    if (decided.outcome === 'off') return { state: 'off' as const };
     if (decided.outcome !== 'agreed') {
       if (decided.outcome === 'read') this.events.publish(`table:${r.table_id}`, 'camera.read', { roundId, ...base, agreed: false });
       return { state: decided.outcome === 'read' ? ('checking' as const) : ('waiting' as const), ...base };
     }
     this.events.publish(`table:${r.table_id}`, 'camera.read', { roundId, ...base, agreed: true });
-    if (mode === 'assist') return { state: 'read' as const, ...base };
+    if (decided.mode === 'assist') return { state: 'read' as const, ...base };
 
-    // Auto: enter the flop. With dual confirmation the camera is the first entry, never both.
-    if (decided.now.pending_by === CAMERA_ACTOR) return { state: 'awaiting_confirmation' as const, ...base };
+    // Auto: enter the flop. With dual confirmation the camera may only be the first entry; the
+    // check runs inside the flop entry's own transaction, so a person entering at the same moment
+    // is never confirmed by the camera.
     try {
-      const res = await this.game.submitFlop(roundId, cards!, CAMERA_ACTOR);
+      const res = await this.game.submitFlop(roundId, cards!, CAMERA_ACTOR, { firstEntryOnly: true });
       return { state: res.settled ? ('settled' as const) : ('awaiting_confirmation' as const), ...base };
     } catch (e) {
+      if (e instanceof AppError && e.code === 'NEEDS_SECOND_PERSON') return { state: 'awaiting_confirmation' as const, ...base };
       if (e instanceof AppError && e.code === 'FLOP_MISMATCH') return { state: 'mismatch' as const, ...base };
       if (e instanceof AppError && e.code === 'ROUND_FINISHED') return { state: 'done' as const };
       throw e;
@@ -157,8 +168,10 @@ export class Camera {
   // The latest reading of a round, for the dealer console.
   async latest(roundId: string) {
     const r = await this.game.round(roundId);
+    // A trusted reading stays on the console even if a later picture was unclear.
     const x = await this.db.get(
-      "SELECT id, cards, confidence, outcome, note, at FROM flop_readings WHERE round_id = ? AND outcome != 'error' ORDER BY seq DESC LIMIT 1", roundId);
+      `SELECT id, cards, confidence, outcome, note, at FROM flop_readings WHERE round_id = ? AND outcome != 'error'
+       ORDER BY CASE WHEN outcome = 'agreed' THEN 1 ELSE 0 END DESC, seq DESC LIMIT 1`, roundId);
     return {
       ...(await this.status(r.table_id)),
       reading: x ? { id: x.id, cards: x.cards ? JSON.parse(x.cards) : null, confidence: Number(x.confidence) / 100, outcome: x.outcome, note: x.note, at: Number(x.at) } : null,
@@ -180,11 +193,11 @@ export class Camera {
     return Buffer.from(x!.image, 'base64');
   }
 
-  private async record(r: Row, cards: string[] | null, outcome: string, note: string | null, image: string | null, by: string, confidence = 0) {
+  private async record(r: Row, cards: string[] | null, outcome: string, note: string | null, image: string | null, by: string, confidence = 0, imageHash: string | null = null) {
     const id = newId('read');
     await this.db.run(
-      `INSERT INTO flop_readings (id, round_id, table_id, at, cards, confidence, outcome, note, model, image, by_actor) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      id, r.id, r.table_id, this.now(), cards ? JSON.stringify(cards) : null, Math.round(confidence * 100), outcome, note, VISION_MODEL, image, by,
+      `INSERT INTO flop_readings (id, round_id, table_id, at, cards, confidence, outcome, note, model, image, image_hash, by_actor) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      id, r.id, r.table_id, this.now(), cards ? JSON.stringify(cards) : null, Math.round(confidence * 100), outcome, note, VISION_MODEL, image, imageHash, by,
     );
     return id;
   }

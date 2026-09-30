@@ -116,7 +116,7 @@ export async function createApp(opts: AppOptions = {}) {
       },
       ...(await balanceOf(p)),
       stats: await accounts.bettingStats(p.id),
-      statement: op.wallet_mode === 'transfer' ? await accounts.statement(p, op.currency, Math.min(Number(req.query.get('limit') ?? 50) || 50, 200)) : null,
+      statement: op.wallet_mode === 'transfer' ? await accounts.statement(p, op.currency, Math.min(Math.max(Math.trunc(Number(req.query.get('limit') ?? 50)) || 50, 1), 200)) : null,
       tournaments: await accounts.playerTournaments(p.id),
       limits: direct ? await safer.view(p) : null,
       seatedAt: await game.seatOf(p.id),

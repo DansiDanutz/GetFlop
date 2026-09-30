@@ -92,3 +92,16 @@ test('the statement keeps the order movements were written in, even from two app
   const lines = await s.app.accounts.statement(p, 'EUR');
   assert.deepEqual(lines.map((l) => [l.amount, l.balanceAfter]), [[-2500, 500], [1000, 3000], [1000, 2000], [1000, 1000]]);
 });
+
+test('the statement is always capped at 1 to 200 lines, whatever limit is asked for', async (t) => {
+  const s = await setup();
+  t.after(() => s.app.stop());
+  const reg = await http(s.app, 'POST', '/v1/auth/register', { username: 'capper', password: 'long-password' });
+  for (let i = 0; i < 3; i++) await s.app.accounts.cashier(reg.body.player.id, 100, 'desk', s.admin);
+  const auth = { authorization: `Bearer ${reg.body.token}` };
+  const lines = async (q: string) => (await http(s.app, 'GET', `/v1/me/account?limit=${q}`, undefined, auth)).body.statement.length;
+  assert.equal(await lines('-1'), 1);
+  assert.equal(await lines('0'), 3); // not a number of lines: the default
+  assert.equal(await lines('2'), 2);
+  assert.equal(await lines('99999'), 3);
+});

@@ -45,7 +45,7 @@ async function refresh() {
   state.round = v.round;
   state.camera = v.camera;
   // Betting closed and the flop not in yet: read it from the camera.
-  if (state.round?.status === 'closed' && state.camera.mode !== 'off' && state.camera.visionReady && !state.scanning) scanLoop(state.round.id);
+  if (state.round?.status === 'closed' && state.camera.mode !== 'off' && state.camera.visionReady && !state.scanning && state.scanDone !== state.round.id) scanLoop(state.round.id);
 }
 
 async function startCamera() {
@@ -108,7 +108,9 @@ async function scanLoop(roundId) {
           const res = await call('POST', `/v1/host/rounds/${roundId}/scan`, { jpeg });
           state.last = { ...res, at: Date.now() };
           render();
-          if (['settled', 'done'].includes(res.state)) break;
+          if (['settled', 'done', 'off'].includes(res.state)) break;
+          // A trusted reading is waiting for a person: stop reading (and paying for) more pictures.
+          if (['read', 'awaiting_confirmation'].includes(res.state)) { state.scanDone = roundId; break; }
         } catch (e) {
           state.last = { state: 'error', message: e.message, at: Date.now() };
           render();
@@ -132,6 +134,7 @@ const STATE_TEXT = {
   mismatch: "The camera and the dealer's entry differ. Both must enter the flop again.",
   busy: 'Reading…',
   done: 'Hand finished.',
+  off: 'Flop reading was switched off for this table.',
   error: 'The card reader did not answer. Retrying.',
 };
 

@@ -195,9 +195,11 @@ CREATE TABLE IF NOT EXISTS flop_readings (
   note TEXT,
   model TEXT,
   image TEXT,
+  image_hash TEXT,
   by_actor TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS flop_readings_by_round ON flop_readings (round_id, seq);
+CREATE INDEX IF NOT EXISTS flop_readings_by_picture ON flop_readings (table_id, image_hash);
 
 -- Safer-play settings of direct players (see safer.ts). Amounts in minor units; NULL = no limit.
 CREATE TABLE IF NOT EXISTS player_limits (

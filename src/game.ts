@@ -294,7 +294,9 @@ export class Game {
   }
 
   // The dealer (and, on dual-confirm tables, a second staff member) enters the flop.
-  async submitFlop(roundId: string, cards: unknown, actor: string) {
+  // firstEntryOnly: the entry may start a dual confirmation but never complete one (the table
+  // camera is never the second person).
+  async submitFlop(roundId: string, cards: unknown, actor: string, opts: { firstEntryOnly?: boolean } = {}) {
     let flop: Flop;
     try { flop = parseFlop(cards); } catch (e: any) { return fail(400, 'BAD_FLOP', e.message); }
     const text = JSON.stringify(flop.map(formatCard));
@@ -309,7 +311,7 @@ export class Game {
           await this.audit.log(actor, 'round.flop_entered', { roundId, flop: JSON.parse(text) });
           return { r, outcome: 'pending' as const };
         }
-        if (r.pending_by === actor) fail(409, 'NEEDS_SECOND_PERSON', 'A different staff member must confirm the flop');
+        if (r.pending_by === actor || opts.firstEntryOnly) fail(409, 'NEEDS_SECOND_PERSON', 'A different staff member must confirm the flop');
         if (!sameFlop(r.pending_flop, text)) {
           await this.db.run('UPDATE rounds SET pending_flop = NULL, pending_by = NULL WHERE id = ?', roundId);
           await this.audit.log(actor, 'round.flop_mismatch', { roundId, first: JSON.parse(r.pending_flop), second: JSON.parse(text), firstBy: r.pending_by });
