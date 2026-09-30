@@ -44,15 +44,20 @@ async function refresh() {
   state.table = v.table;
   state.round = v.round;
   state.camera = v.camera;
-  // Betting closed and the flop not in yet: read it from the camera.
-  if (state.round?.status === 'closed' && state.camera.mode !== 'off' && state.camera.visionReady && !state.scanning && state.scanDone !== scanKey()) scanLoop(state.round.id);
+  maybeScan();
+}
+
+// Betting closed and the flop not in yet: read it from the camera.
+function maybeScan() {
+  if (state.round?.status === 'closed' && state.camera.mode !== 'off' && state.camera.visionReady && !state.scanning && state.scanDone !== scanKey(state.round.id, state.camera.mode, state.round.awaitingConfirmation)) scanLoop(state.round.id);
 }
 
 // Reading pauses once a trusted reading waits for a person, for exactly that situation: the same
-// hand, the same camera mode, the same pending entry. If any of them changes (a switch from assist
-// to auto, or a mismatch that clears the pending entry), reading resumes by itself.
-function scanKey() {
-  return `${state.round?.id}:${state.camera?.mode}:${!!state.round?.awaitingConfirmation}`;
+// hand, the same camera mode and, in auto mode, the same pending entry (in assist mode the camera
+// never enters the flop, so a pending entry changes nothing). If any of them changes (a switch from
+// assist to auto, or a mismatch that clears the pending entry), reading resumes by itself.
+function scanKey(roundId, mode, pending) {
+  return mode === 'auto' ? `${roundId}:auto:${!!pending}` : `${roundId}:${mode}`;
 }
 
 async function startCamera() {
@@ -117,7 +122,11 @@ async function scanLoop(roundId) {
           render();
           if (['settled', 'done', 'off'].includes(res.state)) break;
           // A trusted reading is waiting for a person: stop reading (and paying for) more pictures.
-          if (['read', 'awaiting_confirmation'].includes(res.state)) { await refresh().catch(() => {}); state.scanDone = scanKey(); break; }
+          // The key records what the server acted on ('read' only happens in assist mode, and
+          // 'awaiting_confirmation' only in auto mode with an entry pending), not what a later
+          // refresh sees: a change made meanwhile must still restart reading.
+          if (res.state === 'read') { state.scanDone = scanKey(roundId, 'assist'); break; }
+          if (res.state === 'awaiting_confirmation') { state.scanDone = scanKey(roundId, 'auto', true); break; }
         } catch (e) {
           state.last = { state: 'error', message: e.message, at: Date.now() };
           render();
@@ -130,6 +139,8 @@ async function scanLoop(roundId) {
   } finally {
     state.scanning = false;
   }
+  // Anything that changed while this loop ran (mode, pending entry) is picked up now.
+  await refresh().catch(() => {});
 }
 
 const STATE_TEXT = {
