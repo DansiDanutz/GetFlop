@@ -40,6 +40,7 @@ function syncStream() {
 
 function go(tab, extra = {}) {
   Object.assign(state, { tab, tableId: null, tournamentId: null }, extra);
+  tableVisit++; // responses requested before this navigation are never shown
   syncStream();
   document.querySelectorAll('[data-tab]').forEach((b) => b.classList.toggle('on', b.dataset.tab === tab));
   listen();
@@ -53,7 +54,10 @@ function listen() {
   state.es = stream(url, (ev, data) => {
     if (ev === 'round.settled') {
       loadMe();
-      if (state.tableId) return loadTable().then(() => showResult(data)).catch(() => {});
+      if (state.tableId) {
+        showResult(data).catch(() => {});
+        return loadTable().catch(() => {});
+      }
     }
     if (ev === 'table.changed') return loadMe().then(render);
     if (ev === 'round.bets' && state.data?.round?.id === data.id) {
@@ -91,23 +95,39 @@ async function loadLobby() {
 
 // ---------- table ----------
 // Refreshes can overlap (live updates, the backup timer, the player switching table or wallet).
-// Only the most recently started one may update the screen: an older response must never put
-// back an old table, video or betting wallet (cash vs tournament points).
+// A response is shown only if the player is still on the same visit of the same table with the
+// same betting wallet (cash vs tournament points) it was requested for, and nothing newer has
+// been shown yet. So an
+// older response never puts back an old table, video or wallet, and a slow connection still
+// shows every response that is the newest so far.
 let tableLoadSeq = 0;
+let tableShownSeq = 0;
+let tableLoadsInFlight = 0;
+let lastTableLoadAt = 0;
+let tableVisit = 0;
 async function loadTable() {
   const seq = ++tableLoadSeq;
+  const visit = tableVisit;
   const tableId = state.tableId;
-  const current = () => seq === tableLoadSeq && state.tableId === tableId;
-  const [view, tours] = await Promise.all([call('GET', `/v1/tables/${tableId}`), myRunningTournaments()]);
-  if (!current()) return;
-  const playFor = state.playFor !== 'cash' && !tours.find((t) => t.id === state.playFor) ? 'cash' : state.playFor;
-  const myBets = playFor === 'cash'
-    ? (await call('GET', '/v1/me/bets')).filter((b) => b.roundId === view.round?.id)
-    : (tours.find((t) => t.id === playFor)?.me?.bets ?? []).filter((b) => b.roundId === view.round?.id);
-  if (!current()) return;
-  syncClock(view.serverTime);
-  Object.assign(state, { data: view, tours, playFor, myBets });
-  renderTable();
+  const wanted = state.playFor;
+  const stillWanted = () => tableVisit === visit && state.tableId === tableId && state.playFor === wanted && seq > tableShownSeq;
+  tableLoadsInFlight++;
+  lastTableLoadAt = Date.now();
+  try {
+    const [view, tours] = await Promise.all([call('GET', `/v1/tables/${tableId}`), myRunningTournaments()]);
+    if (!stillWanted()) return;
+    const playFor = wanted !== 'cash' && !tours.find((t) => t.id === wanted) ? 'cash' : wanted;
+    const myBets = playFor === 'cash'
+      ? (await call('GET', '/v1/me/bets')).filter((b) => b.roundId === view.round?.id)
+      : (tours.find((t) => t.id === playFor)?.me?.bets ?? []).filter((b) => b.roundId === view.round?.id);
+    if (!stillWanted()) return;
+    tableShownSeq = seq;
+    syncClock(view.serverTime);
+    Object.assign(state, { data: view, tours, playFor, myBets });
+    renderTable();
+  } finally {
+    tableLoadsInFlight--;
+  }
 }
 
 async function myRunningTournaments() {
@@ -196,9 +216,11 @@ async function bet(market, stake) {
 }
 
 async function showResult(round) {
-  // Check every wallet the player used this hand: cash and each tournament.
-  const cash = (await call('GET', '/v1/me/bets')).filter((b) => b.roundId === round.id);
-  const tour = state.tours.flatMap((t) => (t.me?.bets ?? []).filter((b) => b.roundId === round.id));
+  // Check every wallet the player used this hand, cash and each tournament, from fresh data so
+  // the result does not depend on which table refresh was shown last.
+  const [cashBets, tours] = await Promise.all([call('GET', '/v1/me/bets'), myRunningTournaments()]);
+  const cash = cashBets.filter((b) => b.roundId === round.id);
+  const tour = tours.flatMap((t) => (t.me?.bets ?? []).filter((b) => b.roundId === round.id));
   const mine = [...cash, ...tour];
   if (!mine.length) return;
   const won = mine.filter((b) => round.winningMarkets.includes(b.marketId));
@@ -216,9 +238,11 @@ function tickCountdown() {
 }
 setInterval(tickCountdown, 250);
 // Backup for the live stream (some hosts cut long connections): refresh the open table now and then.
+const STALLED_MS = 12_000;
 setInterval(() => {
   if (document.visibilityState !== 'visible') return;
-  if (state.tableId) loadTable().catch(() => {});
+  // Don't pile up on a slow connection: wait for the pending refresh, but not for a stalled one.
+  if (state.tableId) { if (!tableLoadsInFlight || Date.now() - lastTableLoadAt > STALLED_MS) loadTable().catch(() => {}); }
   else if (state.tournamentId) render();
 }, 4000);
 setInterval(() => { if (document.visibilityState === 'visible') loadMe(); }, 15000);

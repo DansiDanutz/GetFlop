@@ -43,16 +43,16 @@ export type PlayerRow = { id: string; operator_id: string; external_id: string; 
 
 // Other modules (tournaments) settle their own bets on the same real flop, inside the same
 // database transaction. flopIndex is null when the round is voided.
-export type RoundHook = (round: Row, flopIndex: number | null, now: number) => void;
+export type RoundHook = (round: Row, flopIndex: number | null, now: number) => Promise<void>;
 // Called when a player sits down at a table whose round is still taking bets or being dealt,
 // so other modules can cancel that player's bets on the round.
-export type SeatHook = (round: Row, playerId: string, now: number) => number;
+export type SeatHook = (round: Row, playerId: string, now: number) => Promise<number>;
+
+const BET_SELECT = "SELECT b.*, o.wallet_mode, p.external_id FROM bets b JOIN operators o ON o.id = b.operator_id JOIN players p ON p.id = b.player_id";
 
 export class Game {
   readonly roundHooks: RoundHook[] = [];
   readonly seatHooks: SeatHook[] = [];
-  // roundId -> currency -> exposure. Rebuilt from the database on demand after a restart.
-  private exposure = new Map<string, Map<string, Exposure>>();
 
   private db: Db;
   private ledger: Ledger;
@@ -72,30 +72,34 @@ export class Game {
 
   // ---------- tables ----------
 
-  createTable(input: TableInput, actor: string) {
+  async createTable(input: TableInput, actor: string) {
     const t = this.tableFields(input, {});
     const id = newId('tbl');
-    this.db.run(
-      `INSERT INTO tables (id, name, margin_bps, min_stake, max_stake, max_bet_payout, max_round_liability, betting_seconds, dual_confirm, stream_url, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      id, t.name, t.margin_bps, t.min_stake, t.max_stake, t.max_bet_payout, t.max_round_liability, t.betting_seconds, t.dual_confirm, t.stream_url, this.now(),
-    );
-    this.audit.log(actor, 'table.create', { tableId: id, ...t });
+    await this.db.tx(async () => {
+      await this.db.run(
+        `INSERT INTO tables (id, name, margin_bps, min_stake, max_stake, max_bet_payout, max_round_liability, betting_seconds, dual_confirm, stream_url, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        id, t.name, t.margin_bps, t.min_stake, t.max_stake, t.max_bet_payout, t.max_round_liability, t.betting_seconds, t.dual_confirm, t.stream_url, this.now(),
+      );
+      await this.audit.log(actor, 'table.create', { tableId: id, ...t });
+    });
     this.events.publish('lobby', 'tables.changed', {});
     return this.table(id);
   }
 
-  updateTable(id: string, input: Partial<TableInput> & { status?: string }, actor: string) {
-    const current = this.table(id);
+  async updateTable(id: string, input: Partial<TableInput> & { status?: string }, actor: string) {
+    const current = await this.table(id);
     const t = this.tableFields({ name: current.name, ...input }, current);
     const status = input.status === undefined ? current.status : input.status;
     if (status !== 'active' && status !== 'inactive') fail(400, 'BAD_INPUT', 'status must be active or inactive');
-    this.db.run(
-      `UPDATE tables SET name = ?, status = ?, margin_bps = ?, min_stake = ?, max_stake = ?, max_bet_payout = ?, max_round_liability = ?,
-       betting_seconds = ?, dual_confirm = ?, stream_url = ? WHERE id = ?`,
-      t.name, status, t.margin_bps, t.min_stake, t.max_stake, t.max_bet_payout, t.max_round_liability, t.betting_seconds, t.dual_confirm, t.stream_url, id,
-    );
-    this.audit.log(actor, 'table.update', { tableId: id, status, ...t });
+    await this.db.tx(async () => {
+      await this.db.run(
+        `UPDATE tables SET name = ?, status = ?, margin_bps = ?, min_stake = ?, max_stake = ?, max_bet_payout = ?, max_round_liability = ?,
+         betting_seconds = ?, dual_confirm = ?, stream_url = ? WHERE id = ?`,
+        t.name, status, t.margin_bps, t.min_stake, t.max_stake, t.max_bet_payout, t.max_round_liability, t.betting_seconds, t.dual_confirm, t.stream_url, id,
+      );
+      await this.audit.log(actor, 'table.update', { tableId: id, status, ...t });
+    });
     this.events.publish('lobby', 'tables.changed', {});
     this.events.publish(`table:${id}`, 'table.changed', {});
     return this.table(id);
@@ -118,30 +122,31 @@ export class Game {
     return t;
   }
 
-  table(id: string): Row {
-    return this.db.get('SELECT * FROM tables WHERE id = ?', id) ?? fail(404, 'TABLE_NOT_FOUND');
+  async table(id: string): Promise<Row> {
+    return (await this.db.get('SELECT * FROM tables WHERE id = ?', id)) ?? fail(404, 'TABLE_NOT_FOUND');
   }
 
-  listTables(includeInactive = false) {
-    const rows = this.db.all(`SELECT * FROM tables ${includeInactive ? '' : "WHERE status = 'active'"} ORDER BY name`);
-    return rows.map((t) => {
-      const round = this.currentRound(t.id);
-      return { ...publicTable(t), round: round ? this.publicRound(round) : null };
-    });
+  async listTables(includeInactive = false) {
+    const rows = await this.db.all(`SELECT * FROM tables ${includeInactive ? '' : "WHERE status = 'active'"} ORDER BY name`);
+    const out = [];
+    for (const t of rows) {
+      const round = await this.currentRound(t.id);
+      out.push({ ...publicTable(t), round: round ? await this.publicRound(round) : null });
+    }
+    return out;
   }
 
   // Everything a player screen needs for one table.
-  tableView(tableId: string) {
-    const t = this.table(tableId);
+  async tableView(tableId: string) {
+    const t = await this.table(tableId);
     // Between hands the last result stays on screen until the dealer opens the next round.
-    const round = this.currentRound(tableId) ?? this.db.get('SELECT * FROM rounds WHERE table_id = ? ORDER BY number DESC LIMIT 1', tableId);
-    const history = this.db
-      .all("SELECT number, flop, settled_at FROM rounds WHERE table_id = ? AND status = 'settled' ORDER BY number DESC LIMIT 20", tableId)
+    const round = (await this.currentRound(tableId)) ?? (await this.db.get('SELECT * FROM rounds WHERE table_id = ? ORDER BY number DESC LIMIT 1', tableId));
+    const history = (await this.db.all("SELECT number, flop, settled_at FROM rounds WHERE table_id = ? AND status = 'settled' ORDER BY number DESC LIMIT 20", tableId))
       .map((r) => ({ number: r.number, flop: JSON.parse(r.flop), at: r.settled_at }));
     return {
       table: publicTable(t),
       markets: priceList(t.margin_bps).map(({ houseEdge: _h, ...m }) => m),
-      round: round ? this.publicRound(round) : null,
+      round: round ? await this.publicRound(round) : null,
       history,
       serverTime: this.now(),
     };
@@ -150,45 +155,41 @@ export class Game {
   // ---------- seats ----------
   // Staff check players in when they sit down. A seated player cannot bet on that table.
 
-  seatPlayer(tableId: string, playerId: string, actor: string) {
-    this.table(tableId);
-    const player = this.db.get<PlayerRow>('SELECT * FROM players WHERE id = ?', playerId) ?? fail(404, 'PLAYER_NOT_FOUND');
+  async seatPlayer(tableId: string, playerId: string, actor: string) {
+    await this.table(tableId);
+    const player = (await this.db.get<PlayerRow>('SELECT * FROM players WHERE id = ?', playerId)) ?? fail(404, 'PLAYER_NOT_FOUND');
     const now = this.now();
-    const cancelled = this.db.tx(() => {
-      const previous = this.db.get('SELECT table_id FROM seats WHERE player_id = ?', playerId);
-      this.db.run(
+    const cancelled = await this.db.tx(async () => {
+      const previous = await this.db.get('SELECT table_id FROM seats WHERE player_id = ?', playerId);
+      await this.db.run(
         `INSERT INTO seats (player_id, table_id, seated_at, seated_by) VALUES (?, ?, ?, ?)
          ON CONFLICT (player_id) DO UPDATE SET table_id = excluded.table_id, seated_at = excluded.seated_at, seated_by = excluded.seated_by`,
         playerId, tableId, now, actor,
       );
       // Once seated the player may see hole cards, so any bets they already have on the hand
       // being dealt at this table are returned.
-      const round = this.currentRound(tableId);
+      const round = await this.currentRound(tableId);
       let n = 0;
       if (round) {
         // A bet whose wallet debit is still in flight is refunded by placeBet as soon as the
         // debit confirms, because by then the seat below is already recorded.
-        const bets = this.db.all(
-          "SELECT b.*, o.wallet_mode, p.external_id FROM bets b JOIN operators o ON o.id = b.operator_id JOIN players p ON p.id = b.player_id WHERE b.round_id = ? AND b.player_id = ? AND b.status = 'open'",
-          round.id, playerId,
-        );
-        for (const b of bets) this.refund(b, round.id, now);
+        const bets = await this.db.all(`${BET_SELECT} WHERE b.round_id = ? AND b.player_id = ? AND b.status = 'open'`, round.id, playerId);
+        for (const b of bets) await this.refund(b, round.id, now);
         n = bets.length;
-        for (const hook of this.seatHooks) n += hook(round, playerId, now);
+        for (const hook of this.seatHooks) n += await hook(round, playerId, now);
       }
-      this.audit.log(actor, 'seat.take', { tableId, playerId, previousTableId: previous?.table_id ?? null, betsCancelled: n });
+      await this.audit.log(actor, 'seat.take', { tableId, playerId, previousTableId: previous?.table_id ?? null, betsCancelled: n });
       return n;
     });
-    this.exposure.delete(this.currentRound(tableId)?.id ?? '');
     this.events.publish(`table:${tableId}`, 'table.changed', {});
     return { tableId, playerId, displayName: player!.display_name, betsCancelled: cancelled };
   }
 
-  unseatPlayer(tableId: string, playerId: string, actor: string) {
-    const seat = this.db.get('SELECT * FROM seats WHERE player_id = ? AND table_id = ?', playerId, tableId) ?? fail(404, 'NOT_SEATED');
-    this.db.tx(() => {
-      this.db.run('DELETE FROM seats WHERE player_id = ?', playerId);
-      this.audit.log(actor, 'seat.leave', { tableId, playerId, seatedFor: this.now() - seat!.seated_at });
+  async unseatPlayer(tableId: string, playerId: string, actor: string) {
+    const seat = (await this.db.get('SELECT * FROM seats WHERE player_id = ? AND table_id = ?', playerId, tableId)) ?? fail(404, 'NOT_SEATED');
+    await this.db.tx(async () => {
+      await this.db.run('DELETE FROM seats WHERE player_id = ?', playerId);
+      await this.audit.log(actor, 'seat.leave', { tableId, playerId, seatedFor: this.now() - seat!.seated_at });
     });
     this.events.publish(`table:${tableId}`, 'table.changed', {});
     return { ok: true };
@@ -196,34 +197,34 @@ export class Game {
 
   seats(tableId: string) {
     return this.db.all(
-      `SELECT s.player_id AS playerId, p.display_name AS displayName, l.username, o.name AS operator, s.seated_at AS seatedAt
+      `SELECT s.player_id AS "playerId", p.display_name AS "displayName", l.username, o.name AS operator, s.seated_at AS "seatedAt"
        FROM seats s JOIN players p ON p.id = s.player_id JOIN operators o ON o.id = p.operator_id LEFT JOIN player_logins l ON l.player_id = p.id
        WHERE s.table_id = ? ORDER BY s.seated_at`,
       tableId,
     );
   }
 
-  seatOf(playerId: string): string | null {
-    return this.db.get<{ table_id: string }>('SELECT table_id FROM seats WHERE player_id = ?', playerId)?.table_id ?? null;
+  async seatOf(playerId: string): Promise<string | null> {
+    return (await this.db.get<{ table_id: string }>('SELECT table_id FROM seats WHERE player_id = ?', playerId))?.table_id ?? null;
   }
 
-  assertNotSeated(tableId: string, playerId: string) {
-    if (this.seatOf(playerId) === tableId)
+  async assertNotSeated(tableId: string, playerId: string) {
+    if ((await this.seatOf(playerId)) === tableId)
       fail(403, 'SEATED_AT_TABLE', "You're playing at this table, so you can't bet on its flop. Bet on another table.");
   }
 
   // ---------- rounds ----------
 
-  currentRound(tableId: string): Row | undefined {
+  currentRound(tableId: string): Promise<Row | undefined> {
     return this.db.get("SELECT * FROM rounds WHERE table_id = ? AND status IN ('open','closed') ORDER BY number DESC LIMIT 1", tableId);
   }
 
-  round(id: string): Row {
-    return this.db.get('SELECT * FROM rounds WHERE id = ?', id) ?? fail(404, 'ROUND_NOT_FOUND');
+  async round(id: string): Promise<Row> {
+    return (await this.db.get('SELECT * FROM rounds WHERE id = ?', id)) ?? fail(404, 'ROUND_NOT_FOUND');
   }
 
-  publicRound(r: Row) {
-    const counts = this.db.all(
+  async publicRound(r: Row) {
+    const counts = await this.db.all(
       "SELECT market_id, COUNT(*) AS n FROM bets WHERE round_id = ? AND status IN ('pending','open','won','lost') GROUP BY market_id",
       r.id,
     );
@@ -240,133 +241,140 @@ export class Game {
     };
   }
 
-  openRound(tableId: string, actor: string) {
-    const t = this.table(tableId);
-    if (t.status !== 'active') fail(409, 'TABLE_INACTIVE');
-    if (this.currentRound(tableId)) fail(409, 'ROUND_IN_PROGRESS', 'Finish or void the current round first');
-    const number = (this.db.get<{ n: number }>('SELECT MAX(number) AS n FROM rounds WHERE table_id = ?', tableId)?.n ?? 0) + 1;
+  async openRound(tableId: string, actor: string) {
     const id = newId('rnd');
-    const now = this.now();
-    this.db.tx(() => {
-      this.db.run(
+    await this.db.tx(async () => {
+      const t = await this.table(tableId);
+      if (t.status !== 'active') fail(409, 'TABLE_INACTIVE');
+      if (await this.currentRound(tableId)) fail(409, 'ROUND_IN_PROGRESS', 'Finish or void the current round first');
+      const number = ((await this.db.get<{ n: number }>('SELECT MAX(number) AS n FROM rounds WHERE table_id = ?', tableId))?.n ?? 0) + 1;
+      const now = this.now();
+      await this.db.run(
         "INSERT INTO rounds (id, table_id, number, status, opened_at, closes_at, opened_by) VALUES (?, ?, ?, 'open', ?, ?, ?)",
         id, tableId, number, now, now + t.betting_seconds * 1000, actor,
       );
-      this.audit.log(actor, 'round.open', { tableId, roundId: id, number });
+      await this.audit.log(actor, 'round.open', { tableId, roundId: id, number });
     });
     return this.emitRound(tableId, 'round.opened', id);
   }
 
-  closeRound(roundId: string, actor: string) {
-    const r = this.round(roundId);
-    if (r.status !== 'open') fail(409, 'ROUND_NOT_OPEN');
-    const now = Math.min(this.now(), r.closes_at);
-    this.db.tx(() => {
-      this.db.run("UPDATE rounds SET status = 'closed', closed_at = ? WHERE id = ?", now, roundId);
-      this.audit.log(actor, 'round.close', { tableId: r.table_id, roundId });
+  async closeRound(roundId: string, actor: string) {
+    const r = await this.db.tx(async () => {
+      const r = await this.round(roundId);
+      if (r.status !== 'open') fail(409, 'ROUND_NOT_OPEN');
+      await this.db.run("UPDATE rounds SET status = 'closed', closed_at = ? WHERE id = ?", Math.min(this.now(), r.closes_at), roundId);
+      await this.audit.log(actor, 'round.close', { tableId: r.table_id, roundId });
+      return r;
     });
     return this.emitRound(r.table_id, 'round.closed', roundId);
   }
 
-  // Auto-close rounds whose betting window has run out. Called by a timer every 250 ms.
-  tick() {
-    for (const r of this.db.all("SELECT id FROM rounds WHERE status = 'open' AND closes_at <= ?", this.now())) {
-      this.closeRound(r.id, 'system');
+  // Auto-close rounds whose betting window has run out. Called by a timer (or on each request
+  // when hosted without background timers).
+  async tick() {
+    for (const r of await this.db.all("SELECT id FROM rounds WHERE status = 'open' AND closes_at <= ?", this.now())) {
+      try {
+        await this.closeRound(r.id, 'system');
+      } catch (e: any) {
+        if (e?.code !== 'ROUND_NOT_OPEN') throw e; // another copy of the app closed it first
+      }
     }
   }
 
   // The dealer (and, on dual-confirm tables, a second staff member) enters the flop.
-  submitFlop(roundId: string, cards: unknown, actor: string) {
-    const r = this.round(roundId);
-    if (r.status === 'open') fail(409, 'ROUND_STILL_OPEN', 'Close betting before the flop is dealt');
-    if (r.status !== 'closed') fail(409, 'ROUND_FINISHED');
+  async submitFlop(roundId: string, cards: unknown, actor: string) {
     let flop: Flop;
     try { flop = parseFlop(cards); } catch (e: any) { return fail(400, 'BAD_FLOP', e.message); }
     const text = JSON.stringify(flop.map(formatCard));
-    const t = this.table(r.table_id);
-
-    if (t.dual_confirm) {
-      if (!r.pending_flop) {
-        this.db.tx(() => {
-          this.db.run('UPDATE rounds SET pending_flop = ?, pending_by = ? WHERE id = ?', text, actor, roundId);
-          this.audit.log(actor, 'round.flop_entered', { roundId, flop: JSON.parse(text) });
-        });
-        this.emitRound(r.table_id, 'round.flop_pending', roundId);
-        return { settled: false, awaitingConfirmation: true };
+    const result = await this.db.tx(async () => {
+      const r = await this.round(roundId);
+      if (r.status === 'open') fail(409, 'ROUND_STILL_OPEN', 'Close betting before the flop is dealt');
+      if (r.status !== 'closed') fail(409, 'ROUND_FINISHED');
+      const t = await this.table(r.table_id);
+      if (t.dual_confirm) {
+        if (!r.pending_flop) {
+          await this.db.run('UPDATE rounds SET pending_flop = ?, pending_by = ? WHERE id = ?', text, actor, roundId);
+          await this.audit.log(actor, 'round.flop_entered', { roundId, flop: JSON.parse(text) });
+          return { r, outcome: 'pending' as const };
+        }
+        if (r.pending_by === actor) fail(409, 'NEEDS_SECOND_PERSON', 'A different staff member must confirm the flop');
+        if (!sameFlop(r.pending_flop, text)) {
+          await this.db.run('UPDATE rounds SET pending_flop = NULL, pending_by = NULL WHERE id = ?', roundId);
+          await this.audit.log(actor, 'round.flop_mismatch', { roundId, first: JSON.parse(r.pending_flop), second: JSON.parse(text), firstBy: r.pending_by });
+          return { r, outcome: 'mismatch' as const };
+        }
       }
-      if (r.pending_by === actor) fail(409, 'NEEDS_SECOND_PERSON', 'A different staff member must confirm the flop');
-      if (sameFlop(r.pending_flop, text) === false) {
-        this.db.tx(() => {
-          this.db.run('UPDATE rounds SET pending_flop = NULL, pending_by = NULL WHERE id = ?', roundId);
-          this.audit.log(actor, 'round.flop_mismatch', { roundId, first: JSON.parse(r.pending_flop), second: JSON.parse(text), firstBy: r.pending_by });
-        });
-        this.emitRound(r.table_id, 'round.flop_mismatch', roundId);
-        fail(409, 'FLOP_MISMATCH', 'The two entries differ. Both people must enter the flop again.');
-      }
+      await this.settle(r, flop, actor);
+      return { r, outcome: 'settled' as const };
+    });
+    const { r, outcome } = result;
+    if (outcome === 'pending') {
+      await this.emitRound(r.table_id, 'round.flop_pending', roundId);
+      return { settled: false, awaitingConfirmation: true };
     }
-    this.settle(r, flop, actor);
+    if (outcome === 'mismatch') {
+      await this.emitRound(r.table_id, 'round.flop_mismatch', roundId);
+      fail(409, 'FLOP_MISMATCH', 'The two entries differ. Both people must enter the flop again.');
+    }
+    await this.emitRound(r.table_id, 'round.settled', roundId);
     return { settled: true, awaitingConfirmation: false };
   }
 
-  private settle(r: Row, flop: Flop, actor: string) {
+  // Runs inside submitFlop's transaction.
+  private async settle(r: Row, flop: Flop, actor: string) {
     const idx = flopIndex(flop);
     const cards = flop.map(formatCard);
     const now = this.now();
-    const summary = this.db.tx(() => {
-      if (this.db.get("SELECT 1 FROM bets WHERE round_id = ? AND status = 'pending'", r.id))
-        fail(409, 'BETS_PENDING', 'Wallet confirmations are still in flight, retry in a moment');
-      const bets = this.db.all("SELECT b.*, o.wallet_mode, p.external_id FROM bets b JOIN operators o ON o.id = b.operator_id JOIN players p ON p.id = b.player_id WHERE b.round_id = ? AND b.status = 'open'", r.id);
-      let stakes = 0;
-      let payouts = 0;
-      for (const b of bets) {
-        const won = MARKETS.get(b.market_id)!.wins[idx] === 1;
-        const payout = won ? payoutFor(b.stake, b.odds_x100) : 0;
-        const ggr = `ggr:${b.operator_id}`;
-        const entries = [{ account: `escrow:${r.id}`, amount: -b.stake }, { account: ggr, amount: b.stake - payout }];
-        if (payout > 0) entries.push({ account: walletAccount(b), amount: payout });
-        this.ledger.post('settle', b.id, b.currency, entries);
-        if (payout > 0 && b.wallet_mode === 'seamless')
-          this.wallet.enqueue(b.operator_id, 'credit', creditPayload(b, payout, 'win', r.id));
-        this.db.run('UPDATE bets SET status = ?, payout = ?, settled_at = ? WHERE id = ?', won ? 'won' : 'lost', payout, now, b.id);
-        stakes += b.stake;
-        payouts += payout;
-      }
-      for (const hook of this.roundHooks) hook(r, idx, now);
-      this.db.run("UPDATE rounds SET status = 'settled', flop = ?, settled_at = ?, pending_flop = NULL WHERE id = ?", JSON.stringify(cards), now, r.id);
-      this.audit.log(actor, 'round.settle', { tableId: r.table_id, roundId: r.id, flop: cards, confirmedAfter: r.pending_by ?? null, bets: bets.length, stakes, payouts });
-      return { bets: bets.length, stakes, payouts };
-    });
-    this.exposure.delete(r.id);
-    this.emitRound(r.table_id, 'round.settled', r.id);
-    return summary;
+    if (await this.db.get("SELECT 1 FROM bets WHERE round_id = ? AND status = 'pending'", r.id))
+      fail(409, 'BETS_PENDING', 'Wallet confirmations are still in flight, retry in a moment');
+    const bets = await this.db.all(`${BET_SELECT} WHERE b.round_id = ? AND b.status = 'open'`, r.id);
+    let stakes = 0;
+    let payouts = 0;
+    for (const b of bets) {
+      const won = MARKETS.get(b.market_id)!.wins[idx] === 1;
+      const payout = won ? payoutFor(b.stake, b.odds_x100) : 0;
+      const ggr = `ggr:${b.operator_id}`;
+      const entries = [{ account: `escrow:${r.id}`, amount: -b.stake }, { account: ggr, amount: b.stake - payout }];
+      if (payout > 0) entries.push({ account: walletAccount(b), amount: payout });
+      await this.ledger.post('settle', b.id, b.currency, entries);
+      if (payout > 0 && b.wallet_mode === 'seamless')
+        await this.wallet.enqueue(b.operator_id, 'credit', creditPayload(b, payout, 'win', r.id));
+      await this.db.run('UPDATE bets SET status = ?, payout = ?, settled_at = ? WHERE id = ?', won ? 'won' : 'lost', payout, now, b.id);
+      stakes += b.stake;
+      payouts += payout;
+    }
+    for (const hook of this.roundHooks) await hook(r, idx, now);
+    await this.db.run("UPDATE rounds SET status = 'settled', flop = ?, settled_at = ?, pending_flop = NULL WHERE id = ?", JSON.stringify(cards), now, r.id);
+    await this.audit.log(actor, 'round.settle', { tableId: r.table_id, roundId: r.id, flop: cards, confirmedAfter: r.pending_by ?? null, bets: bets.length, stakes, payouts });
+    return { bets: bets.length, stakes, payouts };
   }
 
-  voidRound(roundId: string, reason: unknown, actor: string) {
-    const r = this.round(roundId);
-    if (r.status !== 'open' && r.status !== 'closed') fail(409, 'ROUND_FINISHED', 'Only an open or closed round can be voided');
+  async voidRound(roundId: string, reason: unknown, actor: string) {
     const why = str(reason, 'reason', 300);
     const now = this.now();
-    this.db.tx(() => {
-      if (this.db.get("SELECT 1 FROM bets WHERE round_id = ? AND status = 'pending'", r.id))
+    const r = await this.db.tx(async () => {
+      const r = await this.round(roundId);
+      if (r.status !== 'open' && r.status !== 'closed') fail(409, 'ROUND_FINISHED', 'Only an open or closed round can be voided');
+      if (await this.db.get("SELECT 1 FROM bets WHERE round_id = ? AND status = 'pending'", r.id))
         fail(409, 'BETS_PENDING', 'Wallet confirmations are still in flight, retry in a moment');
-      const bets = this.db.all("SELECT b.*, o.wallet_mode, p.external_id FROM bets b JOIN operators o ON o.id = b.operator_id JOIN players p ON p.id = b.player_id WHERE b.round_id = ? AND b.status = 'open'", r.id);
-      for (const b of bets) this.refund(b, r.id, now);
-      for (const hook of this.roundHooks) hook(r, null, now);
-      this.db.run("UPDATE rounds SET status = 'void', void_reason = ?, closed_at = COALESCE(closed_at, ?), pending_flop = NULL WHERE id = ?", why, now, r.id);
-      this.audit.log(actor, 'round.void', { tableId: r.table_id, roundId: r.id, reason: why, refunded: bets.length });
+      const bets = await this.db.all(`${BET_SELECT} WHERE b.round_id = ? AND b.status = 'open'`, r.id);
+      for (const b of bets) await this.refund(b, r.id, now);
+      for (const hook of this.roundHooks) await hook(r, null, now);
+      await this.db.run("UPDATE rounds SET status = 'void', void_reason = ?, closed_at = COALESCE(closed_at, ?), pending_flop = NULL WHERE id = ?", why, now, r.id);
+      await this.audit.log(actor, 'round.void', { tableId: r.table_id, roundId: r.id, reason: why, refunded: bets.length });
+      return r;
     });
-    this.exposure.delete(r.id);
     return this.emitRound(r.table_id, 'round.voided', r.id);
   }
 
-  private refund(b: Row, roundId: string, now: number) {
-    this.ledger.transfer('refund', b.id, b.currency, `escrow:${roundId}`, walletAccount(b), b.stake);
-    if (b.wallet_mode === 'seamless') this.wallet.enqueue(b.operator_id, 'credit', creditPayload(b, b.stake, 'refund', roundId));
-    this.db.run("UPDATE bets SET status = 'refunded', payout = ?, settled_at = ? WHERE id = ?", b.stake, now, b.id);
+  private async refund(b: Row, roundId: string, now: number) {
+    await this.ledger.transfer('refund', b.id, b.currency, `escrow:${roundId}`, walletAccount(b), b.stake);
+    if (b.wallet_mode === 'seamless') await this.wallet.enqueue(b.operator_id, 'credit', creditPayload(b, b.stake, 'refund', roundId));
+    await this.db.run("UPDATE bets SET status = 'refunded', payout = ?, settled_at = ? WHERE id = ?", b.stake, now, b.id);
   }
 
-  private emitRound(tableId: string, event: string, roundId: string) {
-    const view = this.publicRound(this.round(roundId));
+  private async emitRound(tableId: string, event: string, roundId: string) {
+    const view = await this.publicRound(await this.round(roundId));
     this.events.publish(`table:${tableId}`, event, view);
     this.events.publish('lobby', 'tables.changed', {});
     return view;
@@ -377,110 +385,110 @@ export class Game {
   async placeBet(player: PlayerRow, input: { roundId?: unknown; marketId?: unknown; stake?: unknown; clientRef?: unknown }) {
     const clientRef = optStr(input.clientRef, 'clientRef', 64);
     if (clientRef) {
-      const prior = this.db.get('SELECT * FROM bets WHERE player_id = ? AND client_ref = ?', player.id, clientRef);
+      const prior = await this.db.get('SELECT * FROM bets WHERE player_id = ? AND client_ref = ?', player.id, clientRef);
       if (prior) return publicBet(prior); // retried request: same answer, no second bet
     }
-    const op = this.db.get<OperatorRow>('SELECT * FROM operators WHERE id = ?', player.operator_id)!;
-    if (op.status !== 'active') fail(403, 'OPERATOR_SUSPENDED');
-    if (player.status !== 'active') fail(403, 'PLAYER_BLOCKED');
-
-    const r = this.round(str(input.roundId, 'roundId', 64));
-    if (r.status !== 'open' || this.now() >= r.closes_at) fail(409, 'BETTING_CLOSED');
-    this.assertNotSeated(r.table_id, player.id);
-    const t = this.table(r.table_id);
-    if (t.status !== 'active') fail(409, 'TABLE_INACTIVE');
+    const roundId = str(input.roundId, 'roundId', 64);
     const market = MARKETS.get(str(input.marketId, 'marketId', 40)) ?? fail(400, 'UNKNOWN_MARKET');
-    const odds = priceX100(market, t.margin_bps) ?? fail(400, 'MARKET_NOT_OFFERED');
     const stake = int(input.stake, 'stake', 1);
-    if (stake < t.min_stake || stake > t.max_stake) fail(400, 'STAKE_OUT_OF_RANGE', `Stake must be between ${t.min_stake} and ${t.max_stake}`);
-    const payout = payoutFor(stake, odds);
-    if (payout > t.max_bet_payout) fail(400, 'PAYOUT_LIMIT', `Maximum payout per bet is ${t.max_bet_payout}`);
+    const betId = newId('bet');
 
-    // Liability is capped per currency (see the note at the top of this file).
-    const exposure = this.exposureFor(r.id, op.currency);
-    if (worstCaseAfter(exposure, market.wins, stake, payout) > t.max_round_liability)
-      fail(409, 'TABLE_LIMIT_REACHED', 'This market is full for this round, try a smaller stake or another market');
-
-    const bet = { id: newId('bet'), round_id: r.id, player_id: player.id, operator_id: op.id, market_id: market.id, currency: op.currency, stake, odds_x100: odds, wallet_mode: op.wallet_mode };
-    const insert = (status: string) =>
-      this.db.run(
+    // Everything that decides whether the bet is allowed (round still open, not seated, limits,
+    // the table's worst-flop risk) is checked in the same transaction that records the bet.
+    const { op, r } = await this.db.tx(async () => {
+      const op = (await this.db.get<OperatorRow>('SELECT * FROM operators WHERE id = ?', player.operator_id))!;
+      if (op.status !== 'active') fail(403, 'OPERATOR_SUSPENDED');
+      const fresh = await this.db.get<PlayerRow>('SELECT status FROM players WHERE id = ?', player.id);
+      if (fresh?.status !== 'active') fail(403, 'PLAYER_BLOCKED');
+      const r = await this.round(roundId);
+      if (r.status !== 'open' || this.now() >= r.closes_at) fail(409, 'BETTING_CLOSED');
+      await this.assertNotSeated(r.table_id, player.id);
+      const t = await this.table(r.table_id);
+      if (t.status !== 'active') fail(409, 'TABLE_INACTIVE');
+      const odds = priceX100(market, t.margin_bps) ?? fail(400, 'MARKET_NOT_OFFERED');
+      if (stake < t.min_stake || stake > t.max_stake) fail(400, 'STAKE_OUT_OF_RANGE', `Stake must be between ${t.min_stake} and ${t.max_stake}`);
+      const payout = payoutFor(stake, odds!);
+      if (payout > t.max_bet_payout) fail(400, 'PAYOUT_LIMIT', `Maximum payout per bet is ${t.max_bet_payout}`);
+      // Liability is capped per currency (see the note at the top of this file). Pending
+      // seamless bets count, so parallel bets cannot overshoot the limit.
+      if (worstCaseAfter(await this.exposureFor(r.id, op.currency), market.wins, stake, payout) > t.max_round_liability)
+        fail(409, 'TABLE_LIMIT_REACHED', 'This market is full for this round, try a smaller stake or another market');
+      await this.db.run(
         'INSERT INTO bets (id, round_id, player_id, operator_id, market_id, currency, stake, odds_x100, status, placed_at, client_ref) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-        bet.id, r.id, player.id, op.id, market.id, op.currency, stake, odds, status, this.now(), clientRef,
+        betId, r.id, player.id, op.id, market.id, op.currency, stake, odds, op.wallet_mode === 'transfer' ? 'open' : 'pending', this.now(), clientRef,
       );
+      if (op.wallet_mode === 'transfer') await this.ledger.transfer('bet', betId, op.currency, `player:${player.id}`, `escrow:${r.id}`, stake);
+      return { op, r };
+    });
 
-    if (op.wallet_mode === 'transfer') {
-      this.db.tx(() => {
-        insert('open');
-        this.ledger.transfer('bet', bet.id, op.currency, `player:${player.id}`, `escrow:${r.id}`, stake);
-      });
-      applyExposure(exposure, market.wins, stake, payout, 1);
-    } else {
-      // Reserve the exposure before the network call so parallel bets cannot overshoot the limit.
-      insert('pending');
-      applyExposure(exposure, market.wins, stake, payout, 1);
+    if (op.wallet_mode === 'seamless') {
+      const bet = { id: betId, round_id: r.id, player_id: player.id, operator_id: op.id, market_id: market.id, currency: op.currency, stake, wallet_mode: op.wallet_mode, external_id: player.external_id };
       const res = await this.wallet.call(op, 'debit', {
-        txId: `${bet.id}:debit`, playerId: player.external_id, amount: stake, currency: op.currency, roundId: r.id, betId: bet.id, marketId: market.id,
+        txId: `${betId}:debit`, playerId: player.external_id, amount: stake, currency: op.currency, roundId: r.id, betId, marketId: market.id,
       });
       if (res.ok) {
         // The player may have been checked in at this table while the debit was in flight.
-        const seatedNow = this.seatOf(player.id) === r.table_id;
-        if (seatedNow) applyExposure(this.exposureFor(r.id, op.currency), market.wins, stake, payout, -1);
-        this.db.tx(() => {
-          this.db.run("UPDATE bets SET status = 'open' WHERE id = ?", bet.id);
-          this.ledger.transfer('bet', bet.id, op.currency, `seamless:${op.id}`, `escrow:${r.id}`, stake);
-          if (seatedNow) {
-            this.refund({ ...bet, external_id: player.external_id }, r.id, this.now());
-            this.audit.log('system', 'bet.refund_seated', { betId: bet.id, playerId: player.id, tableId: r.table_id });
+        const seatedNow = await this.db.tx(async () => {
+          await this.db.run("UPDATE bets SET status = 'open' WHERE id = ?", betId);
+          await this.ledger.transfer('bet', betId, op.currency, `seamless:${op.id}`, `escrow:${r.id}`, stake);
+          const seated = (await this.seatOf(player.id)) === r.table_id;
+          if (seated) {
+            await this.refund(bet, r.id, this.now());
+            await this.audit.log('system', 'bet.refund_seated', { betId, playerId: player.id, tableId: r.table_id });
           }
+          return seated;
         });
-        if (seatedNow) this.assertNotSeated(r.table_id, player.id);
+        if (seatedNow) await this.assertNotSeated(r.table_id, player.id);
       } else {
-        applyExposure(this.exposureFor(r.id, op.currency), market.wins, stake, payout, -1);
-        this.db.tx(() => {
-          this.db.run("UPDATE bets SET status = 'rejected' WHERE id = ?", bet.id);
+        await this.db.tx(async () => {
+          await this.db.run("UPDATE bets SET status = 'rejected' WHERE id = ?", betId);
           if (res.uncertain)
-            this.wallet.enqueue(op.id, 'rollback', { txId: `${bet.id}:rollback`, originalTxId: `${bet.id}:debit`, playerId: player.external_id, amount: stake, currency: op.currency, betId: bet.id });
+            await this.wallet.enqueue(op.id, 'rollback', { txId: `${betId}:rollback`, originalTxId: `${betId}:debit`, playerId: player.external_id, amount: stake, currency: op.currency, betId });
         });
         fail(res.code === 'INSUFFICIENT_FUNDS' ? 402 : 502, res.code === 'INSUFFICIENT_FUNDS' ? 'INSUFFICIENT_FUNDS' : 'WALLET_ERROR', res.code);
       }
     }
-    const view = this.publicRound(this.round(r.id));
+    const view = await this.publicRound(await this.round(r.id));
     this.events.publish(`table:${r.table_id}`, 'round.bets', { id: r.id, betsByMarket: view.betsByMarket });
-    return publicBet(this.db.get('SELECT * FROM bets WHERE id = ?', bet.id)!);
+    return publicBet((await this.db.get('SELECT * FROM bets WHERE id = ?', betId))!);
   }
 
-  playerBets(playerId: string, limit = 50) {
-    return this.db
-      .all(
-        `SELECT b.*, r.number AS round_number, r.flop, r.table_id, t.name AS table_name FROM bets b
-         JOIN rounds r ON r.id = b.round_id JOIN tables t ON t.id = r.table_id
-         WHERE b.player_id = ? AND b.status != 'rejected' ORDER BY b.placed_at DESC LIMIT ?`,
-        playerId, limit,
-      )
-      .map((b) => ({ ...publicBet(b), roundNumber: b.round_number, tableId: b.table_id, tableName: b.table_name, flop: b.flop ? JSON.parse(b.flop) : null }));
+  async playerBets(playerId: string, limit = 50) {
+    return (await this.db.all(
+      `SELECT b.*, r.number AS round_number, r.flop, r.table_id, t.name AS table_name FROM bets b
+       JOIN rounds r ON r.id = b.round_id JOIN tables t ON t.id = r.table_id
+       WHERE b.player_id = ? AND b.status != 'rejected' ORDER BY b.placed_at DESC LIMIT ?`,
+      playerId, limit,
+    )).map((b) => ({ ...publicBet(b), roundNumber: b.round_number, tableId: b.table_id, tableName: b.table_name, flop: b.flop ? JSON.parse(b.flop) : null }));
   }
 
   // Worst case for the house on the current round, for the dealer/supervisor screen.
-  roundRisk(roundId: string) {
+  async roundRisk(roundId: string) {
     const out: Record<string, { stakes: number; worstCase: number }> = {};
-    const currencies = this.db.all('SELECT DISTINCT currency FROM bets WHERE round_id = ?', roundId);
+    const currencies = await this.db.all('SELECT DISTINCT currency FROM bets WHERE round_id = ?', roundId);
     for (const { currency } of currencies) {
-      const e = this.exposureFor(roundId, currency);
+      const e = await this.exposureFor(roundId, currency);
       out[currency] = { stakes: e.stakes, worstCase: worstCaseAfter(e, null, 0, 0) };
     }
     return out;
   }
 
-  private exposureFor(roundId: string, currency: string): Exposure {
-    let byCurrency = this.exposure.get(roundId);
-    if (!byCurrency) this.exposure.set(roundId, (byCurrency = new Map()));
-    let e = byCurrency.get(currency);
-    if (!e) {
-      e = { stakes: 0, payouts: new Float64Array(TOTAL_FLOPS) };
-      const live = this.db.all("SELECT market_id, stake, odds_x100 FROM bets WHERE round_id = ? AND currency = ? AND status IN ('pending','open')", roundId, currency);
-      for (const b of live) applyExposure(e, MARKETS.get(b.market_id)!.wins, b.stake, payoutFor(b.stake, b.odds_x100), 1);
-      byCurrency.set(currency, e);
+  // What the house would pay on each of the 22,100 flops for the live bets of a round, computed
+  // from the database so every copy of the app sees the same numbers.
+  private async exposureFor(roundId: string, currency: string): Promise<Exposure> {
+    const e = { stakes: 0, payouts: new Float64Array(TOTAL_FLOPS) };
+    const live = await this.db.all(
+      "SELECT market_id, stake, odds_x100 FROM bets WHERE round_id = ? AND currency = ? AND status IN ('pending','open')",
+      roundId, currency,
+    );
+    const byMarket = new Map<string, { stake: number; payout: number }>();
+    for (const b of live) {
+      const m = byMarket.get(b.market_id) ?? { stake: 0, payout: 0 };
+      m.stake += b.stake;
+      m.payout += payoutFor(b.stake, b.odds_x100);
+      byMarket.set(b.market_id, m);
     }
+    for (const [marketId, m] of byMarket) applyExposure(e, MARKETS.get(marketId)!.wins, m.stake, m.payout, 1);
     return e;
   }
 }

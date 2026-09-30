@@ -4,6 +4,7 @@
   "installCommand": "",
   "buildCommand": "",
   "outputDirectory": "public",
+  "regions": ["fra1"],
   "functions": {
     "api/index.mjs": { "maxDuration": 60, "includeFiles": "src/**" }
   },

@@ -1,7 +1,15 @@
-// Storage: the SQLite engine that ships with Node (node:sqlite). One file, no server to run.
-// All money writes happen inside tx(), so a crash never leaves half a settlement behind.
+// Storage. Two backends behind one async interface:
+//   - SQLite, the engine that ships with Node (node:sqlite): one file or in memory. Local runs,
+//     the Docker image and the tests.
+//   - PostgreSQL through our own client (pg.ts), for shared hosted databases such as Supabase.
+//     Used when DATABASE_URL is set, e.g. on Vercel where many copies of the app share one DB.
+// All money writes happen inside tx(): on PostgreSQL at SERIALIZABLE isolation, retried
+// automatically when two copies of the app touch the same rows at the same time.
+// Queries are written once, SQLite style (? placeholders); translate() adapts them for Postgres.
 
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { DatabaseSync } from 'node:sqlite';
+import { PgConnection, PgError, parseDatabaseUrl, type PgConfig } from './pg.ts';
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS operators (
@@ -203,6 +211,7 @@ CREATE INDEX IF NOT EXISTS tbets_by_round ON tournament_bets (round_id, status);
 
 -- Commission rate history, so an invoice always uses the rate that was agreed for its period.
 CREATE TABLE IF NOT EXISTS commission_rates (
+  seq INTEGER PRIMARY KEY AUTOINCREMENT,
   operator_id TEXT NOT NULL REFERENCES operators(id),
   bps INTEGER NOT NULL,
   effective_from INTEGER NOT NULL,
@@ -230,47 +239,172 @@ CREATE TABLE IF NOT EXISTS invoices (
 `;
 
 export type Row = Record<string, any>;
+type Dialect = 'sqlite' | 'pg';
+
+interface Driver {
+  dialect: Dialect;
+  query(sql: string, params: unknown[]): Promise<Row[]>;
+  run(sql: string, params: unknown[]): Promise<{ changes: number }>;
+  exec(sql: string): Promise<void>;
+  close(): Promise<void>;
+}
+
+class SqliteDriver implements Driver {
+  dialect = 'sqlite' as const;
+  private db: DatabaseSync;
+  constructor(file: string) {
+    this.db = new DatabaseSync(file);
+    this.db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;');
+  }
+  async query(sql: string, params: unknown[]) { return this.db.prepare(sql).all(...(params as any[])) as Row[]; }
+  async run(sql: string, params: unknown[]) { return { changes: Number(this.db.prepare(sql).run(...(params as any[])).changes) }; }
+  async exec(sql: string) { this.db.exec(sql); }
+  async close() { this.db.close(); }
+}
+
+class PgDriver implements Driver {
+  dialect = 'pg' as const;
+  private conn: PgConnection | null = null;
+  private config: PgConfig;
+  constructor(url: string) { this.config = parseDatabaseUrl(url); }
+  // Serverless functions sleep between requests; reconnect when the connection was dropped.
+  private async c() {
+    if (!this.conn || this.conn.isClosed) this.conn = await PgConnection.connect(this.config);
+    return this.conn;
+  }
+  async query(sql: string, params: unknown[]) { return (await (await this.c()).query(sql, params)).rows; }
+  async run(sql: string, params: unknown[]) { return { changes: (await (await this.c()).query(sql, params)).rowCount }; }
+  async exec(sql: string) { await (await this.c()).exec(sql); }
+  async close() { await this.conn?.close(); }
+}
+
+// SQLite-style SQL to PostgreSQL: ? -> $n placeholders (outside string literals), LIKE -> ILIKE
+// (SQLite's LIKE ignores case).
+function translate(sql: string): string {
+  let n = 0;
+  let out = '';
+  let inString = false;
+  for (const ch of sql) {
+    if (ch === "'") inString = !inString;
+    out += !inString && ch === '?' ? `$${++n}` : ch;
+  }
+  return out.replace(/\bLIKE\b/g, 'ILIKE');
+}
+
+function pgSchema(schema: string) {
+  return schema
+    .replace(/INTEGER PRIMARY KEY AUTOINCREMENT/g, 'BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY')
+    .replace(/\bINTEGER\b/g, 'BIGINT');
+}
+
+const RETRYABLE = new Set(['40001', '40P01']); // serialization failure, deadlock
+const MAX_TX_ATTEMPTS = 8;
 
 export class Db {
-  readonly sql: DatabaseSync;
-  private depth = 0;
+  private driver: Driver;
+  private txContext = new AsyncLocalStorage<{ depth: number }>();
+  private lockTail: Promise<unknown> = Promise.resolve();
 
-  constructor(file = ':memory:') {
-    this.sql = new DatabaseSync(file);
-    this.sql.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;');
-    this.sql.exec(SCHEMA);
+  private constructor(driver: Driver) {
+    this.driver = driver;
   }
 
-  get<T = Row>(query: string, ...params: any[]): T | undefined {
-    return this.sql.prepare(query).get(...params) as T | undefined;
-  }
-
-  all<T = Row>(query: string, ...params: any[]): T[] {
-    return this.sql.prepare(query).all(...params) as T[];
-  }
-
-  run(query: string, ...params: any[]) {
-    return this.sql.prepare(query).run(...params);
-  }
-
-  // Nested calls become savepoints, so a service can call another service inside its own tx.
-  tx<T>(fn: () => T): T {
-    const sp = `sp${this.depth}`;
-    this.sql.exec(this.depth === 0 ? 'BEGIN IMMEDIATE' : `SAVEPOINT ${sp}`);
-    this.depth++;
-    try {
-      const out = fn();
-      this.depth--;
-      this.sql.exec(this.depth === 0 ? 'COMMIT' : `RELEASE ${sp}`);
-      return out;
-    } catch (e) {
-      this.depth--;
-      this.sql.exec(this.depth === 0 ? 'ROLLBACK' : `ROLLBACK TO ${sp}; RELEASE ${sp}`);
-      throw e;
+  // databaseUrl: postgres://... (PostgreSQL), otherwise a SQLite file path or ':memory:'.
+  static async open(target = ':memory:'): Promise<Db> {
+    const isPg = /^postgres(ql)?:\/\//.test(target);
+    const db = new Db(isPg ? new PgDriver(target) : new SqliteDriver(target));
+    if (isPg) {
+      // Several cold-starting copies may create the schema at once; the advisory lock serialises them.
+      await db.driver.exec(`BEGIN; SELECT pg_advisory_xact_lock(717171); ${pgSchema(SCHEMA)} COMMIT;`);
+    } else {
+      await db.driver.exec(SCHEMA);
     }
+    return db;
   }
 
-  close() {
-    this.sql.close();
+  get dialect(): Dialect {
+    return this.driver.dialect;
+  }
+
+  async get<T = Row>(query: string, ...params: any[]): Promise<T | undefined> {
+    return (await this.q(query, params))[0] as T | undefined;
+  }
+
+  async all<T = Row>(query: string, ...params: any[]): Promise<T[]> {
+    return (await this.q(query, params)) as T[];
+  }
+
+  async run(query: string, ...params: any[]): Promise<{ changes: number }> {
+    const sql = this.sqlFor(query);
+    return this.inOrder(() => this.driver.run(sql, params));
+  }
+
+  // Runs fn in one transaction. Nested calls become savepoints, so a service can call another
+  // service inside its own transaction. On PostgreSQL a conflicting concurrent transaction makes
+  // the whole of fn run again, so fn must only touch the database (side effects go after).
+  async tx<T>(fn: () => Promise<T>): Promise<T> {
+    const ctx = this.txContext.getStore();
+    if (ctx) {
+      const sp = `sp${ctx.depth++}`;
+      await this.driver.exec(`SAVEPOINT ${sp}`);
+      try {
+        const out = await fn();
+        await this.driver.exec(`RELEASE SAVEPOINT ${sp}`);
+        return out;
+      } catch (e) {
+        await this.driver.exec(`ROLLBACK TO SAVEPOINT ${sp}; RELEASE SAVEPOINT ${sp}`);
+        throw e;
+      } finally {
+        ctx.depth--;
+      }
+    }
+    return this.locked(async () => {
+      for (let attempt = 1; ; attempt++) {
+        await this.driver.exec(this.driver.dialect === 'pg' ? 'BEGIN ISOLATION LEVEL SERIALIZABLE' : 'BEGIN IMMEDIATE');
+        try {
+          const out = await this.txContext.run({ depth: 0 }, fn);
+          await this.driver.exec('COMMIT');
+          return out;
+        } catch (e) {
+          await this.driver.exec('ROLLBACK').catch(() => {});
+          if (e instanceof PgError && RETRYABLE.has(e.code) && attempt < MAX_TX_ATTEMPTS) {
+            await new Promise((r) => setTimeout(r, Math.random() * 20 * attempt));
+            continue;
+          }
+          throw e;
+        }
+      }
+    });
+  }
+
+  // Inside a transaction: blocks other copies of the app from entering the same section until
+  // this transaction ends (PostgreSQL advisory lock). No-op on SQLite (single process).
+  async exclusive(key: number) {
+    if (this.driver.dialect === 'pg') await this.get('SELECT pg_advisory_xact_lock(?)', key);
+  }
+
+  async close() {
+    await this.driver.close();
+  }
+
+  private sqlFor(query: string) {
+    return this.driver.dialect === 'pg' ? translate(query) : query;
+  }
+
+  private q(query: string, params: unknown[]) {
+    const sql = this.sqlFor(query);
+    return this.inOrder(() => this.driver.query(sql, params));
+  }
+
+  // One connection handles one thing at a time: queries outside a transaction wait for the
+  // running transaction; queries inside it go straight through.
+  private inOrder<T>(fn: () => Promise<T>): Promise<T> {
+    return this.txContext.getStore() ? fn() : this.locked(fn);
+  }
+
+  private locked<T>(fn: () => Promise<T>): Promise<T> {
+    const run = this.lockTail.then(fn, fn);
+    this.lockTail = run.catch(() => {});
+    return run;
   }
 }
