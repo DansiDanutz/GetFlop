@@ -1,21 +1,14 @@
 {
   "name": "getflop",
-  "private": true,
   "version": "0.1.0",
+  "private": true,
   "type": "module",
-  "packageManager": "pnpm@10.32.1",
-  "engines": { "node": ">=22" },
+  "description": "Live pre-flop betting on real dealer-dealt poker hands, with a B2B operator API.",
+  "engines": { "node": ">=22.18" },
   "scripts": {
-    "dev": "pnpm -r --parallel --filter ./apps/* dev",
-    "build": "pnpm -r build",
-    "test": "vitest run",
-    "test:watch": "vitest",
-    "coverage": "vitest run --coverage",
-    "typecheck": "pnpm -r typecheck"
-  },
-  "devDependencies": {
-    "@vitest/coverage-v8": "^3.2.4",
-    "typescript": "^5.9.2",
-    "vitest": "^3.2.4"
+    "start": "node --disable-warning=ExperimentalWarning src/main.ts",
+    "demo": "node --disable-warning=ExperimentalWarning src/demo.ts",
+    "test": "node --disable-warning=ExperimentalWarning --test test/*.test.ts",
+    "odds": "node src/print-odds.ts"
   }
 }
