@@ -21,6 +21,7 @@ export function parseCard(text: string): Card {
 }
 
 export const formatCard = (c: Card): string => RANKS[c >> 2] + SUITS[c & 3];
+export const CARD_CODES: string[] = Array.from({ length: 52 }, (_, c) => formatCard(c));
 
 export function parseFlop(cards: unknown): Flop {
   if (!Array.isArray(cards) || cards.length !== 3) throw new Error('a flop is exactly 3 cards');

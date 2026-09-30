@@ -87,6 +87,7 @@ async function load() {
     syncClock(state.data.serverTime);
     const r = state.data.round;
     state.risk = r && (r.status === 'open' || r.status === 'closed') ? await call('GET', `/v1/dealer/rounds/${r.id}/risk`) : null;
+    state.cam = r?.status === 'closed' ? await call('GET', `/v1/dealer/rounds/${r.id}/camera`).catch(() => null) : null;
     render();
   } catch (e) {
     if (e.code === 'TABLE_NOT_FOUND') { localStorage.removeItem('gf.dealer.table'); return pickTable(); }
@@ -108,7 +109,8 @@ function render() {
   $('#view').replaceChildren(h('div', {},
     h('div', { class: 'row', style: 'margin-bottom:12px' }, h('button', { onclick: pickTable }, '← Tables'), h('h1', { style: 'margin:0' }, table.name),
       table.dualConfirm ? h('span', { class: 'pill' }, 'dual confirm') : null,
-      h('a', { class: 'btn small right', href: `tv.html?table=${encodeURIComponent(table.id)}`, target: '_blank', title: 'Open on the TV in the room' }, 'TV screen')),
+      h('a', { class: 'btn small right', href: 'host.html', target: '_blank', title: 'Open on the camera device at the table' }, 'Camera host'),
+      h('a', { class: 'btn small', href: `tv.html?table=${encodeURIComponent(table.id)}`, target: '_blank', title: 'Open on the TV in the room' }, 'TV screen')),
     h('div', { class: 'card row' },
       h('div', {}, h('div', { class: 'muted small' }, round ? `Hand #${round.number}` : ''), h('h2', { style: 'margin:0' }, status)),
       h('div', { class: 'right countdown', id: 'cd' }),
@@ -119,10 +121,29 @@ function render() {
     !round ? h('button', { class: 'primary big', onclick: () => act(() => call('POST', `/v1/dealer/tables/${table.id}/rounds`), 'Betting open') }, 'NEW HAND · open betting') : null,
     round?.status === 'open' ? h('button', { class: 'primary big', onclick: () => act(() => call('POST', `/v1/dealer/rounds/${round.id}/close`), 'No more bets') }, 'NO MORE BETS') : null,
     round?.status === 'open' ? h('p', { class: 'muted small' }, 'Press before the burn card. Betting also closes by itself when the timer ends.') : null,
+    round?.status === 'closed' ? cameraPanel() : null,
     round?.status === 'closed' ? flopPicker(round) : null,
     round ? h('div', { style: 'margin-top:24px' }, h('button', { class: 'danger', disabled: state.me.role === 'dealer', title: state.me.role === 'dealer' ? 'A supervisor must void' : '', onclick: () => voidRound(round) }, 'Void hand (misdeal)')) : null,
   ));
   tick();
+}
+
+// What the table camera read, if it is on. A reading confirmed by two pictures can be used with one tap.
+function cameraPanel() {
+  const c = state.cam;
+  if (!c || c.mode === 'off') return null;
+  const x = c.reading;
+  const pretty = (cards) => cards.map((k) => `${k[0] === 'T' ? '10' : k[0]}${{ s: '♠', h: '♥', d: '♦', c: '♣' }[k[1]]}`).join(' ');
+  const text = !c.live ? 'Camera offline: enter the flop by hand.'
+    : !c.visionReady ? 'Camera live, but flop reading is not set up on the server.'
+    : !x ? 'Camera is looking for the flop…'
+    : x.outcome === 'agreed' ? `Camera read ${pretty(x.cards)} · ${Math.round(x.confidence * 100)}% sure, same on two pictures`
+    : x.outcome === 'read' ? `Camera read ${pretty(x.cards)} once, checking with the next picture…`
+    : 'Camera cannot see all three flop cards clearly yet…';
+  return h('div', { class: 'card row', style: `border-color:${x?.outcome === 'agreed' ? 'var(--green)' : 'var(--line)'}` },
+    h('div', {}, h('div', { class: 'muted small' }, c.mode === 'auto' ? 'Table camera · enters the flop itself' : 'Table camera · you confirm'), h('strong', {}, text)),
+    x?.outcome === 'agreed' && c.mode !== 'auto' ? h('button', { class: 'primary right', onclick: () => { state.picked = [...x.cards]; render(); } }, 'Use camera reading') : null,
+  );
 }
 
 function flopPicker(round) {
@@ -167,3 +188,5 @@ function tick() {
 setInterval(tick, 250);
 // Backup for the live stream: refresh the table console now and then.
 setInterval(() => { if (state.tableId && state.data && document.visibilityState === 'visible') load(); }, 4000);
+// While the flop is being read, check the camera more often.
+setInterval(() => { if (state.data?.round?.status === 'closed' && document.visibilityState === 'visible') load(); }, 2000);

@@ -32,12 +32,35 @@ $('#me').onclick = () => go('account');
 
 // The table's video lives outside #view so re-rendering the table (live updates, the backup
 // refresh) never reloads the player. It is only replaced when the stream URL changes.
+// A table with a video stream shows it above the table (kept outside #view so redraws never reload
+// it). Without one, the table shows the live picture from its camera host inside the table view.
 function syncStream() {
-  const url = (state.tableId && state.data?.table?.id === state.tableId && state.data.table.streamUrl) || '';
+  const here = state.tableId && state.data?.table?.id === state.tableId;
+  const url = (here && state.data.table.streamUrl) || '';
   const el = $('#stream');
   if (el.dataset.url === url) return;
   el.dataset.url = url;
   el.replaceChildren(url ? h('div', { class: 'card' }, h('iframe', { src: url, style: 'width:100%;aspect-ratio:16/9;border:0;border-radius:8px', allow: 'autoplay; fullscreen' })) : '');
+}
+
+// The camera picture: one element kept across redraws, given a new picture about every second
+// (swapped in only once it has loaded, so it never flashes empty).
+function cameraView() {
+  const d = state.data;
+  if (!d?.camera?.live || d.table.streamUrl) return null;
+  const src = () => `/v1/tables/${d.table.id}/camera.jpg?t=${Date.now()}`;
+  if (!state.cam || state.cam.dataset.table !== d.table.id) {
+    const img = h('img', { src: src(), alt: 'Live picture of the table', class: 'live-cam' });
+    state.cam = h('div', { class: 'card cam-card', 'data-table': d.table.id }, h('span', { class: 'pill open live-tag' }, '● Live'), img);
+    clearInterval(state.camTimer);
+    state.camTimer = setInterval(() => {
+      if (document.visibilityState !== 'visible' || !state.cam?.isConnected) return;
+      const next = new Image();
+      next.onload = () => { img.src = next.src; };
+      next.src = `/v1/tables/${state.cam.dataset.table}/camera.jpg?t=${Date.now()}`;
+    }, 1000);
+  }
+  return state.cam;
 }
 
 function go(tab, extra = {}) {
@@ -164,10 +187,12 @@ function tile(t, stake) {
   return h('article', { class: `card tile${live ? ' live' : ''}` },
     h('div', { class: 'row' },
       h('strong', { class: 'tname' }, t.name),
+      t.camera?.live ? h('span', { class: 'pill open', title: 'Camera live' }, '● Live') : null,
       h('span', { class: `pill ${cls}` }, label),
       h('span', { class: 'right countdown tile-cd', 'data-closes': live ? String(r.closesAt) : '' }, ''),
     ),
     h('div', { class: 'muted small' }, [r ? `Hand #${r.number}` : 'No hand yet', `stakes ${money(t.minStake)}–${money(t.maxStake)}`, betCount ? `${betCount} bet${betCount > 1 ? 's' : ''} this hand` : ''].filter(Boolean).join(' · ')),
+    t.camera?.live ? h('img', { class: 'tile-cam', src: `/v1/tables/${t.id}/camera.jpg?t=${t.camera.frameAt}`, alt: `Live picture of ${t.name}`, loading: 'lazy' }) : null,
     h('div', { class: 'tile-flop' },
       flop(settled ? r.flop : null),
       t.recent.length ? h('div', { class: 'recent' }, h('span', { class: 'muted small' }, 'Last flops'), t.recent.slice(0, 3).map((x) => flop(x.flop, true))) : null,
@@ -278,6 +303,7 @@ function renderTable() {
           h('div', { class: 'right countdown', id: 'cd' }, ''),
           h('div', {}, flop(round?.flop)),
         ),
+        cameraView(),
         h('div', { class: 'card' },
           h('div', { class: 'row', style: 'margin-bottom:12px' },
             h('span', { class: 'muted small' }, 'Playing for'),

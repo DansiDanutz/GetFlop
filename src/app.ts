@@ -14,9 +14,11 @@ import { Game, type PlayerRow } from './game.ts';
 import { Accounts } from './accounts.ts';
 import { Billing } from './billing.ts';
 import { SaferPlay } from './safer.ts';
+import { Camera } from './camera.ts';
+import { claudeVision, type VisionFn } from './vision.ts';
 import { STRATEGIES, Tournaments } from './tournaments.ts';
 import { DEMO_STAFF } from './seed.ts';
-import { dispatch, openStream, type Req, Router, serveStatic, STREAMED } from './http.ts';
+import { dispatch, openStream, type Req, Router, sendJpeg, serveStatic, STREAMED } from './http.ts';
 import { fail, int, newSecret, str } from './util.ts';
 import { MARKETS, priceList } from './markets.ts';
 
@@ -31,6 +33,8 @@ export type AppOptions = {
   demo?: boolean;
   // Serverless hosting has no background timers: advance round/tournament clocks on each request.
   tickOnRequest?: boolean;
+  // Reads the flop from camera pictures. Default: Claude, when ANTHROPIC_API_KEY is set; null turns it off.
+  vision?: VisionFn | null;
 };
 
 const ROLE_RANK: Record<string, number> = { dealer: 1, supervisor: 2, admin: 3 };
@@ -49,6 +53,8 @@ export async function createApp(opts: AppOptions = {}) {
   const accounts = new Accounts(db, ledger, audit, now, safer);
   const billing = new Billing(db, audit, now);
   const tournaments = new Tournaments(db, ledger, audit, events, game, now);
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  const camera = new Camera(db, audit, events, game, now, opts.vision !== undefined ? opts.vision : apiKey ? claudeVision(apiKey) : null);
   await accounts.directOperator(opts.directCurrency ?? 'EUR');
 
   const bearer = (req: Req) => {
@@ -81,8 +87,10 @@ export async function createApp(opts: AppOptions = {}) {
   // ----- public + player -----
   r.get('/v1/health', () => ({ ok: true, time: now() }));
   r.get('/v1/markets', () => [...MARKETS.values()].map((m) => ({ id: m.id, group: m.group, name: m.name, probability: m.probability, winningFlops: m.winningFlops })));
-  r.get('/v1/tables', () => game.listTables());
-  r.get('/v1/tables/:id', (req) => game.tableView(req.params.id));
+  r.get('/v1/tables', async () => Promise.all((await game.listTables()).map(async (t) => ({ ...t, camera: await camera.status(t.id) }))));
+  r.get('/v1/tables/:id', async (req) => ({ ...(await game.tableView(req.params.id)), camera: await camera.status(req.params.id) }));
+  // The table's live picture from its host camera (refreshed about once a second).
+  r.get('/v1/tables/:id/camera.jpg', async (req) => sendJpeg(req.res, (await camera.frame(req.params.id)).jpeg));
   r.get('/v1/stream', async (req) => {
     const tableId = req.query.get('table');
     if (tableId) await game.table(tableId);
@@ -169,12 +177,24 @@ export async function createApp(opts: AppOptions = {}) {
       q, q,
     );
   });
+  // ----- table host (the camera device at the table) -----
+  r.post('/v1/host/tables/:id/frame', async (req) => { await staff(req, 'dealer'); return camera.putFrame(req.params.id, req.body.jpeg); });
+  r.post('/v1/host/rounds/:id/scan', async (req) => camera.scan(req.params.id, req.body.jpeg, await actor(req, 'dealer')));
+  r.get('/v1/dealer/rounds/:id/camera', async (req) => { await staff(req, 'dealer'); return camera.latest(req.params.id); });
+  r.get('/v1/dealer/rounds/:id/readings', async (req) => { await staff(req, 'supervisor'); return camera.readings(req.params.id); });
+  r.get('/v1/dealer/readings/:id/picture', async (req) => { await staff(req, 'supervisor'); return sendJpeg(req.res, await camera.evidence(req.params.id)); });
   r.get('/v1/dealer/rounds/:id/risk', async (req) => { await staff(req, 'dealer'); return game.roundRisk(req.params.id); });
 
   // ----- admin -----
-  r.get('/v1/admin/tables', async (req) => { await staff(req, 'supervisor'); return game.listTables(true); });
+  r.get('/v1/admin/tables', async (req) => { await staff(req, 'supervisor'); return Promise.all((await game.listTables(true)).map(async (t) => ({ ...t, camera: await camera.status(t.id) }))); });
   r.post('/v1/admin/tables', async (req) => game.createTable(req.body, await actor(req, 'admin')));
-  r.patch('/v1/admin/tables/:id', async (req) => game.updateTable(req.params.id, req.body, await actor(req, 'admin')));
+  r.patch('/v1/admin/tables/:id', async (req) => {
+    const by = await actor(req, 'admin');
+    const { cameraMode, ...rest } = req.body ?? {};
+    if (cameraMode !== undefined) await camera.setMode(req.params.id, cameraMode, by);
+    const out = Object.keys(rest).length || cameraMode === undefined ? await game.updateTable(req.params.id, rest, by) : await game.table(req.params.id);
+    return { ...out, camera: await camera.status(req.params.id) };
+  });
   r.get('/v1/admin/pricing', async (req) => { await staff(req, 'supervisor'); return priceList(int(Number(req.query.get('marginBps') ?? 500), 'marginBps', 0, 3000)); });
   r.get('/v1/admin/tournaments', async (req) => { await staff(req, 'supervisor'); return tournaments.list(true); });
   r.get('/v1/admin/tournament-strategies', async (req) => { await staff(req, 'supervisor'); return [...STRATEGIES.values()].map((s) => ({ id: s.id, name: s.name, defaults: s.parseRules({}) })); });
@@ -334,7 +354,7 @@ export async function createApp(opts: AppOptions = {}) {
     await db.close();
   }
 
-  return { server, db, ledger, audit, events, wallet, game, accounts, safer, billing, tournaments, startBackground, bootstrapAdmin, stop, tick: tickOnce };
+  return { server, db, ledger, audit, events, wallet, game, accounts, safer, camera, billing, tournaments, startBackground, bootstrapAdmin, stop, tick: tickOnce };
 }
 
 export type App = Awaited<ReturnType<typeof createApp>>;

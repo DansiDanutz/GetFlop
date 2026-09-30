@@ -138,3 +138,9 @@ button.plain { background: transparent; border: 0; padding: 4px 6px; display: in
 .neg { color: var(--red); }
 tr.clickable { cursor: pointer; }
 tr.clickable:hover td { background: var(--panel-2); }
+
+/* live camera picture of a table */
+.cam-card { position: relative; padding: 8px; }
+.live-cam { display: block; width: 100%; max-height: 60vh; object-fit: contain; border-radius: 8px; background: #000; }
+.live-tag { position: absolute; top: 16px; left: 16px; z-index: 1; }
+.tile-cam { display: block; width: 100%; aspect-ratio: 16 / 9; object-fit: cover; border-radius: 8px; background: #000; }

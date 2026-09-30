@@ -31,9 +31,13 @@ async function tables(el) {
   el.append(
     h('div', { class: 'card' }, h('h2', {}, 'Tables'),
       h('table', { class: 'list' },
-        h('tr', {}, h('th', {}, 'Name'), h('th', {}, 'Status'), h('th', { class: 'num' }, 'Margin'), h('th', { class: 'num' }, 'Stake'), h('th', { class: 'num' }, 'Max hand risk / currency'), h('th', { class: 'num' }, 'Betting'), h('th', {}, '')),
+        h('tr', {}, h('th', {}, 'Name'), h('th', {}, 'Status'), h('th', { class: 'num' }, 'Margin'), h('th', { class: 'num' }, 'Stake'), h('th', { class: 'num' }, 'Max hand risk / currency'), h('th', { class: 'num' }, 'Betting'), h('th', {}, 'Camera'), h('th', {}, '')),
         list.map((t) => h('tr', {}, h('td', {}, t.name, t.dualConfirm ? h('span', { class: 'muted small' }, ' · dual confirm') : ''), h('td', {}, h('span', { class: 'pill' }, t.status)),
           h('td', { class: 'num' }, `${t.marginBps / 100}%`), h('td', { class: 'num' }, `${money(t.minStake)}–${money(t.maxStake)}`), h('td', { class: 'num' }, money(t.maxRoundLiability)), h('td', { class: 'num' }, `${t.bettingSeconds}s`),
+          h('td', {}, h('select', { 'aria-label': `Camera for ${t.name}`, style: 'width:auto', onchange: async (e) => {
+            try { await call('PATCH', `/v1/admin/tables/${t.id}`, { cameraMode: e.target.value }); toast('Camera setting saved'); } catch (err) { toast(err.message, true); }
+          } }, [['off', 'Off · dealer enters the flop'], ['assist', 'Reads the flop, dealer confirms'], ['auto', 'Reads and enters the flop']].map(([v, l]) => h('option', { value: v, selected: t.camera?.mode === v }, l))),
+            h('div', { class: 'muted small' }, t.camera?.live ? '● camera live' : 'no camera connected')),
           h('td', {}, h('button', { class: 'small', onclick: async () => { await call('PATCH', `/v1/admin/tables/${t.id}`, { status: t.status === 'active' ? 'inactive' : 'active' }); show('tables'); } }, t.status === 'active' ? 'Deactivate' : 'Activate')))))),
     h('div', { class: 'card' }, h('h2', {}, 'New table'),
       form([

@@ -164,6 +164,34 @@ CREATE TABLE IF NOT EXISTS player_logins (
   password_hash TEXT NOT NULL
 );
 
+-- The camera over each table (see camera.ts): its mode, the latest picture, when the host device
+-- was last heard from. One row per table that has had a camera.
+CREATE TABLE IF NOT EXISTS table_cameras (
+  table_id TEXT PRIMARY KEY REFERENCES tables(id),
+  mode TEXT NOT NULL DEFAULT 'assist' CHECK (mode IN ('off','assist','auto')),
+  frame TEXT,
+  frame_at INTEGER,
+  host_seen_at INTEGER,
+  updated_at INTEGER NOT NULL
+);
+
+-- Every AI reading of a flop. The picture is kept for the reading that was acted on, as evidence.
+CREATE TABLE IF NOT EXISTS flop_readings (
+  seq INTEGER PRIMARY KEY AUTOINCREMENT,
+  id TEXT NOT NULL UNIQUE,
+  round_id TEXT NOT NULL REFERENCES rounds(id),
+  table_id TEXT NOT NULL,
+  at INTEGER NOT NULL,
+  cards TEXT,
+  confidence INTEGER NOT NULL,
+  outcome TEXT NOT NULL,
+  note TEXT,
+  model TEXT,
+  image TEXT,
+  by_actor TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS flop_readings_by_round ON flop_readings (round_id, seq);
+
 -- Safer-play settings of direct players (see safer.ts). Amounts in minor units; NULL = no limit.
 CREATE TABLE IF NOT EXISTS player_limits (
   player_id TEXT PRIMARY KEY REFERENCES players(id),

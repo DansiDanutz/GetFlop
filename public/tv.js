@@ -89,7 +89,8 @@ function render() {
     ),
     h('main', {},
       h('section', { class: 'stage' },
-        flop(settled ? r.flop : null),
+        // While a hand is in play the camera shows the real table; at the result, the flop itself.
+        !settled && view.camera?.live ? camImg() : flop(settled ? r.flop : null),
         h('div', { class: 'msg' }, p.msg),
         settled ? h('div', { class: 'winners' }, r.winningMarkets.map((id) => h('span', {}, name(id)))) : h('div', { class: 'sub' }, p.sub),
       ),
@@ -113,6 +114,22 @@ function render() {
     document.fullscreenElement || !document.documentElement.requestFullscreen ? '' : h('button', { id: 'fs', class: 'small', onclick: () => document.documentElement.requestFullscreen().then(render).catch(() => {}) }, 'Full screen'),
   );
   tick();
+}
+
+// One picture element, kept across redraws and fed a new picture about every second.
+let cam = null;
+function camImg() {
+  if (!cam) {
+    cam = h('img', { class: 'tv-cam', alt: 'Live picture of the table' });
+    setInterval(() => {
+      if (!view?.camera?.live || !cam.isConnected) return;
+      const next = new Image();
+      next.onload = () => { cam.src = next.src; };
+      next.src = `/v1/tables/${encodeURIComponent(tableId)}/camera.jpg?t=${Date.now()}`;
+    }, 1000);
+    cam.src = `/v1/tables/${encodeURIComponent(tableId)}/camera.jpg?t=${Date.now()}`;
+  }
+  return cam;
 }
 
 function tick() {

@@ -49,7 +49,7 @@ This is software, not a licence. Real-money betting and paid-entry tournaments a
 
 1. **Pilot in our own club:** freeroll tournaments on one table, dual-confirm on, camera recording.
 2. **Video:** low-latency stream per table (WebRTC or LL-HLS) in the `streamUrl` slot.
-3. **Card recognition:** RFID shoe or camera recognition instead of manual flop entry (removes the human-error and collusion risk of item 4).
+3. **Card recognition:** built: a camera over each table and AI flop reading (docs/CAMERA.md), with dealer confirmation or fully automatic entry. Next: run it at our tables, measure accuracy per table, then consider an RFID shoe for certification where a regulator requires it.
 4. **Licence + payments + KYC** → real-money cash betting for direct players.
 5. **First partner** on the seamless wallet; monthly invoices from Admin → Commission.
 6. **More content:** more markets (exact card, flop total, turn/river), more tournament formats, partner-branded tables.
