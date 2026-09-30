@@ -22,7 +22,7 @@ No frameworks and no runtime dependencies. Everything runs on what ships with No
 
 ```bash
 npm run demo     # in-memory demo with staff, a table, players and a tournament; prints the links
-npm test         # 19 tests: pricing, ledger, rounds, risk limits, wallets, API, commission, tournaments
+npm test         # 28 tests: pricing, ledger, rounds, risk limits, seating, wallets, API, commission, tournaments
 npm run odds     # the price list: exact probabilities and odds at a given margin (npm run odds -- 300)
 ```
 
