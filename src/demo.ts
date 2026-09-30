@@ -6,8 +6,8 @@ import { seedDemo } from './seed.ts';
 
 const port = Number(process.env.PORT ?? 4000);
 const publicUrl = `http://localhost:${port}`;
-const app = createApp({ dbFile: ':memory:', publicUrl, demo: true });
-const { op, links } = seedDemo(app, publicUrl);
+const app = await createApp({ dbFile: ':memory:', publicUrl, demo: true });
+const { op, links } = await seedDemo(app, publicUrl);
 
 app.startBackground();
 app.server.listen(port, () => {
@@ -26,4 +26,4 @@ Operator API credentials for "House Club":
   secret ${op.secret}
 `);
 });
-process.on('SIGINT', () => { app.stop(); process.exit(0); });
+process.on('SIGINT', () => { void app.stop().finally(() => process.exit(0)); });

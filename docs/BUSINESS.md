@@ -53,4 +53,4 @@ This is software, not a licence. Real-money betting and paid-entry tournaments a
 4. **Licence + payments + KYC** → real-money cash betting for direct players.
 5. **First partner** on the seamless wallet; monthly invoices from Admin → Commission.
 6. **More content:** more markets (exact card, flop total, turn/river), more tournament formats, partner-branded tables.
-7. **Scale:** move from SQLite to PostgreSQL when one server is no longer enough. The storage layer is one file (`src/db.ts`) on purpose.
+7. **Scale:** PostgreSQL is supported (set `DATABASE_URL`), so several app servers can share one database; money-moving transactions run SERIALIZABLE and retry on conflict. SQLite stays the simple single-server option.

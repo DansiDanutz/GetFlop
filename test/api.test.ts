@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { http, setup, signed } from './helpers.ts';
 
 test('operator API: signed requests, launch sessions, transfers and reconciliation', async (t) => {
-  const s = setup({ publicUrl: 'https://play.getflop.test' });
+  const s = await setup({ publicUrl: 'https://play.getflop.test' });
   t.after(() => s.app.stop());
   const call = (method: string, path: string, body?: unknown) => http(s.app, method, path, body, signed(s.op, s.clock.t, method, path, body));
 
@@ -24,7 +24,7 @@ test('operator API: signed requests, launch sessions, transfers and reconciliati
   assert.equal(again.body.balance, 5000); // same txId: applied once
 
   const auth = { authorization: `Bearer ${session.body.token}` };
-  const round = s.app.game.openRound(s.table.id, 'staff:dealer');
+  const round = await s.app.game.openRound(s.table.id, 'staff:dealer');
   const bet = await http(s.app, 'POST', '/v1/bets', { roundId: round.id, marketId: 'ALL_RED', stake: 1000 }, auth);
   assert.equal(bet.status, 200, JSON.stringify(bet.body));
   assert.equal((await http(s.app, 'GET', '/v1/me', undefined, auth)).body.balance, 4000);
@@ -42,10 +42,10 @@ test('operator API: signed requests, launch sessions, transfers and reconciliati
 });
 
 test('direct sign-up, staff roles and the dealer flow over HTTP', async (t) => {
-  const s = setup();
+  const s = await setup();
   t.after(() => s.app.stop());
-  s.app.accounts.createStaff('boss', 'boss-password-1', 'admin', 'system');
-  s.app.accounts.createStaff('deal', 'deal-password-1', 'dealer', 'system');
+  await s.app.accounts.createStaff('boss', 'boss-password-1', 'admin', 'system');
+  await s.app.accounts.createStaff('deal', 'deal-password-1', 'dealer', 'system');
 
   const reg = await http(s.app, 'POST', '/v1/auth/register', { username: 'Nick', password: 'secret-pass', displayName: 'Nick' });
   assert.equal(reg.status, 200);
@@ -77,26 +77,26 @@ test('direct sign-up, staff roles and the dealer flow over HTTP', async (t) => {
 });
 
 test('commission invoices carry losing periods forward', async () => {
-  const s = setup();
+  const s = await setup();
   const DAY = 86_400_000;
-  const p = s.player('whale', 1_000_000);
+  const p = await s.player('whale', 1_000_000);
   const play = async (market: string, stake: number, flop: string[]) => {
-    const r = s.app.game.openRound(s.table.id, 'd');
+    const r = await s.app.game.openRound(s.table.id, 'd');
     await s.app.game.placeBet(p, { roundId: r.id, marketId: market, stake });
-    s.app.game.closeRound(r.id, 'd');
-    s.app.game.submitFlop(r.id, flop, 'd');
+    await s.app.game.closeRound(r.id, 'd');
+    await s.app.game.submitFlop(r.id, flop, 'd');
   };
   const start = s.clock.t;
   await play('TRIPS', 1000, ['9h', '9d', '9c']); // house loses 403,750 - 1,000
   s.advance(DAY);
-  const inv1 = s.app.billing.createInvoice(s.op.id, start, s.clock.t, s.admin);
+  const inv1 = await s.app.billing.createInvoice(s.op.id, start, s.clock.t, s.admin);
   assert.equal(inv1.commission, 0);
   assert.equal(inv1.carry_out, -402_750);
 
   for (let i = 0; i < 5; i++) await play('RAINBOW', 100_000, ['Ah', 'Kh', '2c']); // player loses 500,000
   s.advance(DAY);
   await assert.rejects(async () => s.app.billing.createInvoice(s.op.id, start, s.clock.t, s.admin), { code: 'PERIOD_NOT_CONTIGUOUS' });
-  const inv2 = s.app.billing.createInvoice(s.op.id, inv1.period_to, s.clock.t, s.admin);
+  const inv2 = await s.app.billing.createInvoice(s.op.id, inv1.period_to, s.clock.t, s.admin);
   assert.equal(inv2.ggr, 500_000);
   assert.equal(inv2.commission_base, 500_000 - 402_750);
   assert.equal(inv2.commission, Math.floor(97_250 * 0.2));
@@ -104,7 +104,7 @@ test('commission invoices carry losing periods forward', async () => {
 });
 
 test('demo mode: instant play-money players, demo logins, and clocks that advance on requests', async (t) => {
-  const s = setup({ demo: true, tickOnRequest: true });
+  const s = await setup({ demo: true, tickOnRequest: true });
   t.after(() => s.app.stop());
   assert.equal((await http(s.app, 'GET', '/v1/demo/info')).body.demo, true);
   const guest = await http(s.app, 'POST', '/v1/demo/player');
@@ -112,14 +112,14 @@ test('demo mode: instant play-money players, demo logins, and clocks that advanc
   const me = await http(s.app, 'GET', '/v1/me', undefined, { authorization: `Bearer ${guest.body.token}` });
   assert.equal(me.body.balance, 50_000);
   // No background timer: the round closes on the next request after its window.
-  const round = s.app.game.openRound(s.table.id, 'staff:dealer');
+  const round = await s.app.game.openRound(s.table.id, 'staff:dealer');
   s.advance(31_000);
   await http(s.app, 'GET', '/v1/health');
-  assert.equal(s.app.game.round(round.id).status, 'closed');
+  assert.equal((await s.app.game.round(round.id)).status, 'closed');
 });
 
 test('demo endpoints are off outside demo mode', async (t) => {
-  const s = setup();
+  const s = await setup();
   t.after(() => s.app.stop());
   assert.equal((await http(s.app, 'GET', '/v1/demo/info')).body.demo, false);
   assert.equal((await http(s.app, 'POST', '/v1/demo/player')).status, 404);

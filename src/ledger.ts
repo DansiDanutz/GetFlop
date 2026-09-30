@@ -29,29 +29,29 @@ export class Ledger {
     this.now = now;
   }
 
-  post(kind: string, ref: string | null, currency: string, entries: Entry[]): string {
+  async post(kind: string, ref: string | null, currency: string, entries: Entry[]): Promise<string> {
     const sum = entries.reduce((s, e) => s + e.amount, 0);
     if (sum !== 0) throw new Error(`ledger tx ${kind} does not balance (${sum})`);
     if (entries.some((e) => !Number.isSafeInteger(e.amount))) throw new Error('ledger amounts must be integers');
-    return this.db.tx(() => {
+    return this.db.tx(async () => {
       const id = newId('tx');
-      this.db.run('INSERT INTO ledger_tx (id, kind, ref, created_at) VALUES (?, ?, ?, ?)', id, kind, ref, this.now());
+      await this.db.run('INSERT INTO ledger_tx (id, kind, ref, created_at) VALUES (?, ?, ?, ?)', id, kind, ref, this.now());
       for (const e of entries) {
         if (e.amount === 0) continue;
-        this.db.run('INSERT INTO ledger_entries (tx_id, account, currency, amount) VALUES (?, ?, ?, ?)', id, e.account, currency, e.amount);
-        this.db.run(
+        await this.db.run('INSERT INTO ledger_entries (tx_id, account, currency, amount) VALUES (?, ?, ?, ?)', id, e.account, currency, e.amount);
+        await this.db.run(
           `INSERT INTO balances (account, currency, balance) VALUES (?, ?, ?)
-           ON CONFLICT (account, currency) DO UPDATE SET balance = balance + excluded.balance`,
+           ON CONFLICT (account, currency) DO UPDATE SET balance = balances.balance + excluded.balance`,
           e.account, currency, e.amount,
         );
-        if (!MAY_BE_NEGATIVE.test(e.account) && this.balance(e.account, currency) < 0)
+        if (!MAY_BE_NEGATIVE.test(e.account) && (await this.balance(e.account, currency)) < 0)
           fail(402, 'INSUFFICIENT_FUNDS', 'Not enough balance');
       }
       return id;
     });
   }
 
-  transfer(kind: string, ref: string | null, currency: string, from: string, to: string, amount: number): string {
+  transfer(kind: string, ref: string | null, currency: string, from: string, to: string, amount: number): Promise<string> {
     return this.post(kind, ref, currency, [{ account: from, amount: -amount }, { account: to, amount }]);
   }
 
@@ -59,19 +59,19 @@ export class Ledger {
     return this.db.get<{ id: string }>('SELECT id FROM ledger_tx WHERE kind = ? AND ref = ?', kind, ref);
   }
 
-  balance(account: string, currency: string): number {
-    return this.db.get<{ balance: number }>('SELECT balance FROM balances WHERE account = ? AND currency = ?', account, currency)?.balance ?? 0;
+  async balance(account: string, currency: string): Promise<number> {
+    return (await this.db.get<{ balance: number }>('SELECT balance FROM balances WHERE account = ? AND currency = ?', account, currency))?.balance ?? 0;
   }
 
   // Integrity check for the admin screen: cached balances must equal the sum of entries,
   // and the whole book must sum to zero in every currency.
-  verify() {
-    const mismatched = this.db.all(
+  async verify() {
+    const mismatched = await this.db.all(
       `SELECT b.account, b.currency, b.balance, COALESCE(SUM(e.amount), 0) AS computed
        FROM balances b LEFT JOIN ledger_entries e ON e.account = b.account AND e.currency = b.currency
-       GROUP BY b.account, b.currency HAVING b.balance != computed`,
+       GROUP BY b.account, b.currency HAVING b.balance != COALESCE(SUM(e.amount), 0)`,
     );
-    const totals = this.db.all('SELECT currency, SUM(amount) AS total FROM ledger_entries GROUP BY currency HAVING total != 0');
+    const totals = await this.db.all('SELECT currency, SUM(amount) AS total FROM ledger_entries GROUP BY currency HAVING SUM(amount) != 0');
     return { ok: mismatched.length === 0 && totals.length === 0, mismatched, unbalancedCurrencies: totals };
   }
 }

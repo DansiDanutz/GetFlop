@@ -28,6 +28,7 @@ export type FetchFn = (url: string, init: { method: string; headers: Record<stri
 const TIMEOUT_MS = 3_000;
 const ALERT_AFTER = 25;
 const MAX_BACKOFF_MS = 600_000;
+const CLAIM_MS = 30_000;
 
 export class SeamlessWallet {
   private db: Db;
@@ -69,29 +70,29 @@ export class SeamlessWallet {
     }
   }
 
-  enqueue(operatorId: string, action: 'credit' | 'rollback', payload: Record<string, unknown>) {
-    this.db.run(
+  async enqueue(operatorId: string, action: 'credit' | 'rollback', payload: Record<string, unknown>) {
+    await this.db.run(
       'INSERT INTO outbox (id, operator_id, action, payload, next_attempt_at, created_at) VALUES (?, ?, ?, ?, ?, ?)',
       newId('ob'), operatorId, action, JSON.stringify(payload), this.now(), this.now(),
     );
   }
 
   // Messages that have not been acknowledged after many attempts, for the admin screen.
-  stuck() {
+  async stuck() {
     return this.db.all("SELECT * FROM outbox WHERE status = 'pending' AND attempts >= ? ORDER BY created_at LIMIT 200", ALERT_AFTER);
   }
 
   // Admin action once the partner says their wallet is back: try now instead of waiting for backoff.
-  retryNow(operatorId?: string) {
+  async retryNow(operatorId?: string) {
     const res = operatorId
-      ? this.db.run("UPDATE outbox SET next_attempt_at = ? WHERE status = 'pending' AND operator_id = ?", this.now(), operatorId)
-      : this.db.run("UPDATE outbox SET next_attempt_at = ? WHERE status = 'pending'", this.now());
+      ? await this.db.run("UPDATE outbox SET next_attempt_at = ? WHERE status = 'pending' AND operator_id = ?", this.now(), operatorId)
+      : await this.db.run("UPDATE outbox SET next_attempt_at = ? WHERE status = 'pending'", this.now());
     return { scheduled: Number(res.changes) };
   }
 
   // Delivers due outbox messages. Backoff: 2s, 4s, 8s ... capped at 10 minutes.
   async deliverDue(limit = 50) {
-    const due = this.db.all(
+    const due = await this.db.all(
       `SELECT o.*, p.name, p.currency, p.wallet_mode, p.wallet_url, p.api_key, p.secret, p.commission_bps, p.status AS op_status
        FROM outbox o JOIN operators p ON p.id = o.operator_id
        WHERE o.status = 'pending' AND o.next_attempt_at <= ? ORDER BY o.created_at LIMIT ?`,
@@ -99,17 +100,23 @@ export class SeamlessWallet {
     );
     let delivered = 0;
     for (const row of due) {
+      // Claim the message first, so another copy of the app does not send it at the same time.
+      const claim = await this.db.run(
+        "UPDATE outbox SET next_attempt_at = ? WHERE id = ? AND status = 'pending' AND next_attempt_at = ?",
+        this.now() + CLAIM_MS, row.id, row.next_attempt_at,
+      );
+      if (claim.changes !== 1) continue;
       const op = { ...row, id: row.operator_id, status: row.op_status } as OperatorRow;
       const res = await this.call(op, row.action, JSON.parse(row.payload));
       const attempts = row.attempts + 1;
       if (res.ok) {
-        this.db.run("UPDATE outbox SET status = 'done', attempts = ?, last_error = NULL WHERE id = ?", attempts, row.id);
+        await this.db.run("UPDATE outbox SET status = 'done', attempts = ?, last_error = NULL WHERE id = ?", attempts, row.id);
         delivered++;
       } else {
         if (attempts === ALERT_AFTER)
-          this.audit.log('system', 'outbox.stuck', { outboxId: row.id, operatorId: row.operator_id, action: row.action, error: res.code });
+          await this.audit.log('system', 'outbox.stuck', { outboxId: row.id, operatorId: row.operator_id, action: row.action, error: res.code });
         const delay = Math.min(2_000 * 2 ** Math.min(attempts - 1, 20), MAX_BACKOFF_MS);
-        this.db.run('UPDATE outbox SET attempts = ?, last_error = ?, next_attempt_at = ? WHERE id = ?', attempts, res.code, this.now() + delay, row.id);
+        await this.db.run('UPDATE outbox SET attempts = ?, last_error = ?, next_attempt_at = ? WHERE id = ?', attempts, res.code, this.now() + delay, row.id);
       }
     }
     return delivered;
