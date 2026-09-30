@@ -184,7 +184,7 @@ function renderTable() {
           h('div', { class: 'markets' }, markets.map((m) => h('button', {
             class: `mkt${wins.has(m.id) ? ' win' : ''}${mine.has(m.id) ? ' mine' : ''}`, disabled: !open,
             onclick: () => bet(m, chips[state.chip]),
-          }, h('div', { class: 'count' }, round?.betsByMarket?.[m.id] ? `${round.betsByMarket[m.id]} bets` : ''), h('div', { class: 'odds' }, odds(m.oddsX100)), h('div', { class: 'name' }, m.name)))),
+          }, h('div', { class: 'count' }, round?.betsByMarket?.[m.id] ? `${round.betsByMarket[m.id]} bet${round.betsByMarket[m.id] > 1 ? 's' : ''}` : ''), h('div', { class: 'odds' }, odds(m.oddsX100)), h('div', { class: 'name' }, m.name)))),
           h('p', { class: 'muted small' }, `Tap a chip, then a market. Odds include your stake. ${state.playFor === 'cash' ? `Limits ${money(table.minStake)}–${money(table.maxStake)} per bet.` : tour ? `Tournament: ${tour.rules.minStake}–${tour.rules.maxStake} pts per bet.` : ''}`),
         ),
       ),
@@ -201,7 +201,8 @@ function renderTable() {
 }
 
 const short = (n) => (n >= 1000 ? `${n / 1000}k` : String(n));
-const marketName = (id) => state.data?.markets.find((m) => m.id === id)?.name ?? id;
+let marketNames = {}; // id -> name, loaded once for screens without a table
+const marketName = (id) => state.data?.markets.find((m) => m.id === id)?.name ?? marketNames[id] ?? id;
 
 async function bet(market, stake) {
   const round = state.data.round;
@@ -302,13 +303,17 @@ async function join(t) {
 
 // ---------- history ----------
 async function loadHistory() {
-  const bets = await call('GET', '/v1/me/bets');
+  const [bets, markets] = await Promise.all([call('GET', '/v1/me/bets'), Object.keys(marketNames).length ? null : call('GET', '/v1/markets')]);
+  if (markets) marketNames = Object.fromEntries(markets.map((m) => [m.id, m.name]));
+  // Four columns so it fits a phone: what/where, the bet, the flop, the outcome.
   $('#view').replaceChildren(h('div', { class: 'card' },
     bets.length ? h('table', { class: 'list' },
-      h('tr', {}, h('th', {}, 'When'), h('th', {}, 'Table'), h('th', {}, 'Bet'), h('th', { class: 'num' }, 'Stake'), h('th', { class: 'num' }, 'Odds'), h('th', {}, 'Flop'), h('th', {}, 'Result'), h('th', { class: 'num' }, 'Paid')),
-      bets.map((b) => h('tr', {}, h('td', { class: 'small' }, time(b.placedAt)), h('td', {}, `${b.tableName} #${b.roundNumber}`), h('td', {}, b.marketId),
-        h('td', { class: 'num' }, money(b.stake, b.currency)), h('td', { class: 'num' }, odds(b.oddsX100)), h('td', {}, b.flop ? flop(b.flop, true) : ''),
-        h('td', {}, h('span', { class: `pill ${b.status}` }, b.status)), h('td', { class: 'num' }, b.payout ? money(b.payout, b.currency) : ''))),
+      h('tr', {}, h('th', {}, 'Hand'), h('th', {}, 'Bet'), h('th', {}, 'Flop'), h('th', { class: 'num' }, 'Result')),
+      bets.map((b) => h('tr', {},
+        h('td', {}, `${b.tableName} #${b.roundNumber}`, h('div', { class: 'muted small' }, time(b.placedAt))),
+        h('td', {}, marketName(b.marketId), h('div', { class: 'muted small' }, `${money(b.stake, b.currency)} @ ${odds(b.oddsX100)}`)),
+        h('td', {}, b.flop ? flop(b.flop, true) : ''),
+        h('td', { class: 'num' }, h('span', { class: `pill ${b.status}` }, b.status), b.payout ? h('div', { class: 'small' }, money(b.payout, b.currency)) : ''))),
     ) : h('div', { class: 'muted' }, 'No bets yet.')));
 }
 
