@@ -28,8 +28,19 @@ $('#logout').onclick = async () => {
 };
 document.querySelectorAll('[data-tab]').forEach((b) => (b.onclick = () => go(b.dataset.tab)));
 
+// The table's video lives outside #view so re-rendering the table (live updates, the backup
+// refresh) never reloads the player. It is only replaced when the stream URL changes.
+function syncStream() {
+  const url = (state.tableId && state.data?.table?.id === state.tableId && state.data.table.streamUrl) || '';
+  const el = $('#stream');
+  if (el.dataset.url === url) return;
+  el.dataset.url = url;
+  el.replaceChildren(url ? h('div', { class: 'card' }, h('iframe', { src: url, style: 'width:100%;aspect-ratio:16/9;border:0;border-radius:8px', allow: 'autoplay; fullscreen' })) : '');
+}
+
 function go(tab, extra = {}) {
   Object.assign(state, { tab, tableId: null, tournamentId: null }, extra);
+  syncStream();
   document.querySelectorAll('[data-tab]').forEach((b) => b.classList.toggle('on', b.dataset.tab === tab));
   listen();
   render();
@@ -108,6 +119,7 @@ function chipValues() {
 const fmtStake = (v) => (state.playFor === 'cash' ? money(v) : `${pts(v)} pts`);
 
 function renderTable() {
+  syncStream();
   const { table, round, markets, history } = state.data;
   const finished = round && (round.status === 'settled' || round.status === 'void');
   const chips = chipValues();
@@ -147,7 +159,6 @@ function renderTable() {
         ),
       ),
       h('div', {},
-        table.streamUrl ? h('div', { class: 'card' }, h('iframe', { src: table.streamUrl, style: 'width:100%;aspect-ratio:16/9;border:0;border-radius:8px', allow: 'autoplay; fullscreen' })) : null,
         h('div', { class: 'card' }, h('h3', {}, finished ? `My bets · hand #${round.number}` : 'My bets this hand'),
           state.myBets.length ? h('table', { class: 'list' }, state.myBets.map((b) => h('tr', {}, h('td', {}, marketName(b.marketId)), h('td', { class: 'num' }, fmtStake(b.stake)), h('td', { class: 'num' }, `@${odds(b.oddsX100)}`), h('td', {}, h('span', { class: `pill ${b.status}` }, b.status)))))
             : h('div', { class: 'muted small' }, 'None yet.')),
