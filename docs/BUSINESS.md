@@ -28,7 +28,7 @@ Live flop betting on real dealer-dealt poker hands, from our own poker club, and
 
 People physically at the table have information remote bettors don't:
 
-1. **Seated players know their hole cards.** Holding A♠A♥ makes "at least one ace" on the flop much less likely. **Rule: players seated at a table (and the dealer) must not bet on that table.** Enforce it in the club (house rules, staff) and, later, in software by linking seat check-in to accounts.
+1. **Seated players know their hole cards.** Holding A♠A♥ makes "at least one ace" on the flop much less likely. **Rule: players seated at a table (and the dealer) must not bet on that table.** The dealer console has a *Seated players* panel: staff check players in when they sit down. A seated player's bets on that table are refused (cash and tournament), and any bets they already had on the hand being dealt are returned. Make check-in part of seating a player, the same as taking the buy-in. Staff accounts are separate from player accounts and cannot bet.
 2. **Betting closes before the burn card.** The dealer presses NO MORE BETS before burning. Betting also closes automatically when the timer ends. The server rejects any late bet, whatever the client shows.
 3. **Stream delay.** If there is a video stream, remote players see events late. Closing before the burn card covers this, because nothing about the flop is visible yet.
 4. **Wrong flop entry, by mistake or on purpose.** Tables can require **dual confirmation**: a second staff member enters the same three cards independently. Mismatches are logged and both must re-enter. Every flop, void and limit change goes into a **hash-chained audit log** that can't be edited silently. Record the table on camera with timestamps.

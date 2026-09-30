@@ -86,7 +86,7 @@ export function createApp(opts: AppOptions = {}) {
   });
   r.get('/v1/me', async (req) => {
     const p = player(req);
-    return { playerId: p.id, displayName: p.display_name, ...(await balanceOf(p)) };
+    return { playerId: p.id, displayName: p.display_name, seatedAt: game.seatOf(p.id), ...(await balanceOf(p)) };
   });
   r.get('/v1/me/bets', (req) => game.playerBets(player(req).id));
   r.post('/v1/bets', (req) => game.placeBet(player(req), req.body));
@@ -120,6 +120,20 @@ export function createApp(opts: AppOptions = {}) {
   r.post('/v1/dealer/rounds/:id/close', (req) => game.closeRound(req.params.id, staff(req, 'dealer').actor));
   r.post('/v1/dealer/rounds/:id/flop', (req) => game.submitFlop(req.params.id, req.body.cards, staff(req, 'dealer').actor));
   r.post('/v1/dealer/rounds/:id/void', (req) => game.voidRound(req.params.id, req.body.reason, staff(req, 'supervisor').actor));
+  r.get('/v1/dealer/tables/:id/seats', (req) => { staff(req, 'dealer'); return game.seats(req.params.id); });
+  r.post('/v1/dealer/tables/:id/seats', (req) => game.seatPlayer(req.params.id, str(req.body.playerId, 'playerId', 64), staff(req, 'dealer').actor));
+  r.post('/v1/dealer/tables/:id/seats/:playerId/remove', (req) => game.unseatPlayer(req.params.id, req.params.playerId, staff(req, 'dealer').actor));
+  r.get('/v1/dealer/players', (req) => {
+    staff(req, 'dealer');
+    const q = `%${(req.query.get('q') ?? '').trim()}%`;
+    if (q.length < 4) return [];
+    return db.all(
+      `SELECT p.id AS playerId, p.display_name AS displayName, l.username, o.name AS operator, s.table_id AS seatedAt
+       FROM players p JOIN operators o ON o.id = p.operator_id LEFT JOIN player_logins l ON l.player_id = p.id LEFT JOIN seats s ON s.player_id = p.id
+       WHERE p.display_name LIKE ? OR l.username LIKE ? ORDER BY p.display_name LIMIT 20`,
+      q, q,
+    );
+  });
   r.get('/v1/dealer/rounds/:id/risk', (req) => { staff(req, 'dealer'); return game.roundRisk(req.params.id); });
 
   // ----- admin -----

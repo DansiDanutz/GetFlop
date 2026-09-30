@@ -158,3 +158,38 @@ test('seamless wallet: debit, refusal, timeout rollback and retried credits', as
   assert.deepEqual([credit.body.amount, credit.body.reason, credit.body.txId], [8070, 'win', `${bet.id}:win`]);
   assert.equal(s.app.ledger.verify().ok, true);
 });
+
+test('a seated player cannot bet on their own table, and sitting down returns bets on the live hand', async () => {
+  const s = setup();
+  const other = s.app.game.createTable({ name: 'T2' }, s.admin);
+  const alex = s.player('alex');
+  const t = s.app.tournaments.create({ name: 'Race', startsAt: s.clock.t, endsAt: s.clock.t + 3600_000 }, s.admin);
+  s.app.tournaments.join(t.id, alex);
+
+  const r1 = s.app.game.openRound(s.table.id, 'staff:dealer');
+  const r2 = s.app.game.openRound(other.id, 'staff:dealer');
+  await s.app.game.placeBet(alex, { roundId: r1.id, marketId: 'HAS_ACE', stake: 1000 });
+  s.app.tournaments.placeBet(t.id, alex, { roundId: r1.id, marketId: 'HAS_ACE', stake: 100 });
+
+  const seat = s.app.game.seatPlayer(s.table.id, alex.id, 'staff:dealer');
+  assert.equal(seat.betsCancelled, 2);
+  assert.equal(s.balance(alex.id), 100_000);
+  assert.equal(s.app.tournaments.entry(t.id, alex.id)!.points, 1000);
+  assert.equal(s.app.tournaments.entry(t.id, alex.id)!.bets_used, 0);
+  assert.equal(s.app.game.roundRisk(r1.id).EUR.stakes, 0);
+
+  await err(s.app.game.placeBet(alex, { roundId: r1.id, marketId: 'HAS_ACE', stake: 1000 }), 'SEATED_AT_TABLE');
+  await err(() => s.app.tournaments.placeBet(t.id, alex, { roundId: r1.id, marketId: 'HAS_ACE', stake: 100 }), 'SEATED_AT_TABLE');
+  // Other tables are fine.
+  await s.app.game.placeBet(alex, { roundId: r2.id, marketId: 'HAS_ACE', stake: 1000 });
+  assert.deepEqual(s.app.game.seats(s.table.id).map((x: any) => x.playerId), [alex.id]);
+
+  // Moving to the other table frees the first one.
+  s.app.game.seatPlayer(other.id, alex.id, 'staff:dealer');
+  assert.equal(s.app.game.seats(s.table.id).length, 0);
+  assert.equal(s.app.game.playerBets(alex.id).find((b) => b.roundId === r2.id)!.status, 'refunded');
+  await s.app.game.placeBet(alex, { roundId: r1.id, marketId: 'HAS_ACE', stake: 1000 });
+  s.app.game.unseatPlayer(other.id, alex.id, 'staff:dealer');
+  assert.equal(s.app.game.seatOf(alex.id), null);
+  assert.equal(s.app.ledger.verify().ok, true);
+});

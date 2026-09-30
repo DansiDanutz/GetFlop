@@ -9,6 +9,7 @@ requireStaff((me) => { state.me = me; state.tableId ? openTable(state.tableId) :
 
 async function pickTable() {
   state.es?.close();
+  $('#seats').replaceChildren();
   const tables = await call('GET', '/v1/dealer/tables');
   $('#view').replaceChildren(h('h2', {}, 'Choose your table'),
     tables.length ? h('div', { class: 'grid' }, tables.map((t) => h('button', { class: 'card big', onclick: () => openTable(t.id) }, t.name))) : h('p', { class: 'muted' }, 'No active tables. An admin can create one.'));
@@ -18,8 +19,66 @@ function openTable(id) {
   state.tableId = id;
   localStorage.setItem('gf.dealer.table', id);
   state.es?.close();
-  state.es = stream(`/v1/stream?table=${id}`, (ev) => { if (ev !== 'tables.changed') load(); });
+  state.es = stream(`/v1/stream?table=${id}`, (ev) => {
+    if (ev === 'table.changed') loadSeats();
+    if (ev !== 'tables.changed') load();
+  });
+  buildSeatsPanel();
   load();
+}
+
+// ---------- seated players ----------
+// Players sitting at this table can see their hole cards, so they must not bet on its flop.
+// The panel is built once per table so typing in the search box survives live updates.
+function buildSeatsPanel() {
+  const results = h('div', {});
+  let timer;
+  const search = h('input', { placeholder: 'Find a player by name or username', oninput: () => {
+    clearTimeout(timer);
+    timer = setTimeout(async () => {
+      const q = search.value.trim();
+      if (q.length < 2) return results.replaceChildren();
+      const found = await call('GET', `/v1/dealer/players?q=${encodeURIComponent(q)}`).catch(() => []);
+      results.replaceChildren(found.length ? h('table', { class: 'list' }, found.map((p) => h('tr', {},
+        h('td', {}, p.displayName, h('div', { class: 'muted small' }, p.username ?? p.operator)),
+        h('td', {}, p.seatedAt === state.tableId ? h('span', { class: 'muted small' }, 'seated here')
+          : h('button', { class: 'small', onclick: () => seat(p) }, p.seatedAt ? 'Move here' : 'Seat'))))) : h('p', { class: 'muted small' }, 'No player found.'));
+    }, 250);
+  } });
+  state.seatSearch = { search, results };
+  $('#seats').replaceChildren(h('div', { class: 'card' },
+    h('h2', {}, 'Seated players'),
+    h('p', { class: 'muted small' }, 'Check players in when they sit down. They cannot bet on this table while seated; bets they already have on the current hand are returned.'),
+    h('div', { id: 'seat-list', style: 'margin-bottom:12px' }), search, results));
+  loadSeats();
+}
+
+async function loadSeats() {
+  const el = $('#seat-list');
+  if (!el) return;
+  const seats = await call('GET', `/v1/dealer/tables/${state.tableId}/seats`).catch(() => []);
+  el.replaceChildren(seats.length ? h('table', { class: 'list' }, seats.map((p) => h('tr', {},
+    h('td', {}, p.displayName, h('div', { class: 'muted small' }, p.username ?? p.operator)),
+    h('td', { class: 'small muted' }, `since ${new Date(p.seatedAt).toLocaleTimeString()}`),
+    h('td', {}, h('button', { class: 'small', onclick: () => unseat(p) }, 'Left table'))))) : h('p', { class: 'muted small' }, 'Nobody checked in.'));
+}
+
+async function seat(p) {
+  try {
+    const res = await call('POST', `/v1/dealer/tables/${state.tableId}/seats`, { playerId: p.playerId });
+    toast(`${res.displayName} seated${res.betsCancelled ? `, ${res.betsCancelled} bet(s) on this hand returned` : ''}`);
+    state.seatSearch.search.value = '';
+    state.seatSearch.results.replaceChildren();
+    loadSeats();
+    load();
+  } catch (e) { toast(e.message, true); }
+}
+
+async function unseat(p) {
+  try {
+    await call('POST', `/v1/dealer/tables/${state.tableId}/seats/${p.playerId}/remove`);
+    loadSeats();
+  } catch (e) { toast(e.message, true); }
 }
 
 async function load() {

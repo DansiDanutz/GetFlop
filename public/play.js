@@ -44,6 +44,7 @@ function listen() {
       loadMe();
       if (state.tableId) return loadTable().then(() => showResult(data)).catch(() => {});
     }
+    if (ev === 'table.changed') return loadMe().then(render);
     if (ev === 'round.bets' && state.data?.round?.id === data.id) {
       state.data.round.betsByMarket = data.betsByMarket;
       return renderTable();
@@ -111,18 +112,21 @@ function renderTable() {
   const finished = round && (round.status === 'settled' || round.status === 'void');
   const chips = chipValues();
   state.chip = Math.min(state.chip, chips.length - 1);
-  const open = round?.status === 'open' && serverNow() < round.closesAt;
+  const seatedHere = state.me.seatedAt === table.id;
+  const live = round?.status === 'open' && serverNow() < round.closesAt;
+  const open = live && !seatedHere;
   const mine = new Set(state.myBets.map((b) => b.marketId));
   const wins = new Set(round?.winningMarkets ?? []);
   const tour = state.tours.find((t) => t.id === state.playFor);
 
   $('#view').replaceChildren(
     h('div', { class: 'row', style: 'margin-bottom:12px' }, h('button', { onclick: () => go('tables') }, '← Tables'), h('h1', { style: 'margin:0' }, table.name)),
+    seatedHere ? h('div', { class: 'card', style: 'border-color:var(--gold)' }, "You're checked in at this table, so you can't bet on its flop. Pick another table to bet.") : '',
     h('div', { class: 'split' },
       h('div', {},
         h('div', { class: 'card row' },
           h('div', {}, h('div', { class: 'muted small' }, !round ? 'Waiting for the first hand' : finished ? `Hand #${round.number} · next hand soon` : `Hand #${round.number}`),
-            h('span', { class: `pill ${round?.status ?? ''}` }, !round ? 'waiting' : finished ? (round.status === 'void' ? 'hand voided' : 'result') : open ? 'Place your bets' : round.status === 'open' ? 'closing' : round.awaitingConfirmation ? 'confirming flop' : 'no more bets')),
+            h('span', { class: `pill ${round?.status ?? ''}` }, !round ? 'waiting' : finished ? (round.status === 'void' ? 'hand voided' : 'result') : live ? 'Place your bets' : round.status === 'open' ? 'closing' : round.awaitingConfirmation ? 'confirming flop' : 'no more bets')),
           h('div', { class: 'right countdown', id: 'cd' }, ''),
           h('div', {}, flop(round?.flop)),
         ),

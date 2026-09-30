@@ -22,7 +22,7 @@ No frameworks and no runtime dependencies. Everything runs on what ships with No
 
 ```bash
 npm run demo     # in-memory demo with staff, a table, players and a tournament; prints the links
-npm test         # 18 tests: pricing, ledger, rounds, risk limits, wallets, API, commission, tournaments
+npm test         # 19 tests: pricing, ledger, rounds, risk limits, wallets, API, commission, tournaments
 npm run odds     # the price list: exact probabilities and odds at a given margin (npm run odds -- 300)
 ```
 
@@ -31,6 +31,16 @@ Production-style start (data kept in `data/getflop.db`):
 ```bash
 ADMIN_USERNAME=owner ADMIN_PASSWORD='a-long-password' PUBLIC_URL=https://play.example.com npm start
 ```
+
+With Docker (the database lives in the `getflop-data` volume; back it up):
+
+```bash
+docker build -t getflop .
+docker run -d --name getflop -p 4000:4000 -v getflop-data:/app/data \
+  -e ADMIN_USERNAME=owner -e ADMIN_PASSWORD='a-long-password' -e PUBLIC_URL=https://play.example.com getflop
+```
+
+Put it behind HTTPS (any reverse proxy, e.g. Caddy or nginx). Live updates use Server-Sent Events, so disable response buffering for `/v1/stream` and `/v1/tournaments/*/stream` if the proxy buffers.
 
 | Screen | URL | Who |
 |---|---|---|
@@ -45,7 +55,7 @@ ADMIN_USERNAME=owner ADMIN_PASSWORD='a-long-password' PUBLIC_URL=https://play.ex
 |---|---|
 | `src/cards.ts` | Cards and all 22,100 possible flops |
 | `src/markets.ts` | The bet menu; exact probabilities; odds at a margin |
-| `src/game.ts` | Tables, rounds (open → closed → settled / void), bets, worst-flop risk limit |
+| `src/game.ts` | Tables, seated players, rounds (open → closed → settled / void), bets, worst-flop risk limit |
 | `src/ledger.ts` | Double-entry ledger: money only moves, never appears or disappears |
 | `src/wallet.ts` | Seamless wallet calls to partners, with a retrying outbox |
 | `src/accounts.ts` | Partners and request signing, players, sign-up, cashier, staff, sessions |

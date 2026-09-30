@@ -117,6 +117,7 @@ export class Tournaments {
     this.game = game;
     this.now = now;
     game.roundHooks.push((round, flopIdx, at) => this.settleRound(round, flopIdx, at));
+    game.seatHooks.push((round, playerId, at) => this.cancelPlayerBets(round, playerId, at));
   }
 
   create(input: Row, actor: string) {
@@ -264,6 +265,7 @@ export class Tournaments {
     const entry = this.entry(tournamentId, player.id) ?? fail(409, 'NOT_JOINED');
     const round = this.game.round(str(input.roundId, 'roundId', 64));
     if (round.status !== 'open' || this.now() >= round.closes_at) fail(409, 'BETTING_CLOSED');
+    this.game.assertNotSeated(round.table_id, player.id);
     const table = this.game.table(round.table_id);
     if (table.status !== 'active') fail(409, 'TABLE_INACTIVE');
     const market = MARKETS.get(str(input.marketId, 'marketId', 40)) ?? fail(400, 'UNKNOWN_MARKET');
@@ -301,6 +303,18 @@ export class Tournaments {
       if (payout) this.db.run('UPDATE tournament_entries SET points = points + ? WHERE tournament_id = ? AND player_id = ?', payout, b.tournament_id, b.player_id);
     }
     queueMicrotask(() => touched.forEach((id) => this.publish(id)));
+  }
+
+  // A player who sits down at the table gets this hand's tournament bets back (points and bet count).
+  private cancelPlayerBets(round: Row, playerId: string, now: number) {
+    const bets = this.db.all("SELECT * FROM tournament_bets WHERE round_id = ? AND player_id = ? AND status = 'open'", round.id, playerId);
+    for (const b of bets) {
+      this.db.run("UPDATE tournament_bets SET status = 'refunded', payout = stake, settled_at = ? WHERE id = ?", now, b.id);
+      this.db.run('UPDATE tournament_entries SET points = points + ?, bets_used = bets_used - 1 WHERE tournament_id = ? AND player_id = ?', b.stake, b.tournament_id, playerId);
+    }
+    const touched = new Set(bets.map((b) => b.tournament_id));
+    queueMicrotask(() => touched.forEach((id) => this.publish(id)));
+    return bets.length;
   }
 
   // Moves tournaments through their life cycle. Called by the background timer.

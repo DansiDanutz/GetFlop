@@ -39,9 +39,13 @@ export type PlayerRow = { id: string; operator_id: string; external_id: string; 
 // Other modules (tournaments) settle their own bets on the same real flop, inside the same
 // database transaction. flopIndex is null when the round is voided.
 export type RoundHook = (round: Row, flopIndex: number | null, now: number) => void;
+// Called when a player sits down at a table whose round is still taking bets or being dealt,
+// so other modules can cancel that player's bets on the round.
+export type SeatHook = (round: Row, playerId: string, now: number) => number;
 
 export class Game {
   readonly roundHooks: RoundHook[] = [];
+  readonly seatHooks: SeatHook[] = [];
   // roundId -> currency -> exposure. Rebuilt from the database on demand after a restart.
   private exposure = new Map<string, Map<string, Exposure>>();
 
@@ -136,6 +140,71 @@ export class Game {
       history,
       serverTime: this.now(),
     };
+  }
+
+  // ---------- seats ----------
+  // Staff check players in when they sit down. A seated player cannot bet on that table.
+
+  seatPlayer(tableId: string, playerId: string, actor: string) {
+    this.table(tableId);
+    const player = this.db.get<PlayerRow>('SELECT * FROM players WHERE id = ?', playerId) ?? fail(404, 'PLAYER_NOT_FOUND');
+    const now = this.now();
+    const cancelled = this.db.tx(() => {
+      const previous = this.db.get('SELECT table_id FROM seats WHERE player_id = ?', playerId);
+      this.db.run(
+        `INSERT INTO seats (player_id, table_id, seated_at, seated_by) VALUES (?, ?, ?, ?)
+         ON CONFLICT (player_id) DO UPDATE SET table_id = excluded.table_id, seated_at = excluded.seated_at, seated_by = excluded.seated_by`,
+        playerId, tableId, now, actor,
+      );
+      // Once seated the player may see hole cards, so any bets they already have on the hand
+      // being dealt at this table are returned.
+      const round = this.currentRound(tableId);
+      let n = 0;
+      if (round) {
+        if (this.db.get("SELECT 1 FROM bets WHERE round_id = ? AND player_id = ? AND status = 'pending'", round.id, playerId))
+          fail(409, 'BETS_PENDING', 'Wallet confirmations are still in flight, retry in a moment');
+        const bets = this.db.all(
+          "SELECT b.*, o.wallet_mode, p.external_id FROM bets b JOIN operators o ON o.id = b.operator_id JOIN players p ON p.id = b.player_id WHERE b.round_id = ? AND b.player_id = ? AND b.status = 'open'",
+          round.id, playerId,
+        );
+        for (const b of bets) this.refund(b, round.id, now);
+        n = bets.length;
+        for (const hook of this.seatHooks) n += hook(round, playerId, now);
+      }
+      this.audit.log(actor, 'seat.take', { tableId, playerId, previousTableId: previous?.table_id ?? null, betsCancelled: n });
+      return n;
+    });
+    this.exposure.delete(this.currentRound(tableId)?.id ?? '');
+    this.events.publish(`table:${tableId}`, 'table.changed', {});
+    return { tableId, playerId, displayName: player!.display_name, betsCancelled: cancelled };
+  }
+
+  unseatPlayer(tableId: string, playerId: string, actor: string) {
+    const seat = this.db.get('SELECT * FROM seats WHERE player_id = ? AND table_id = ?', playerId, tableId) ?? fail(404, 'NOT_SEATED');
+    this.db.tx(() => {
+      this.db.run('DELETE FROM seats WHERE player_id = ?', playerId);
+      this.audit.log(actor, 'seat.leave', { tableId, playerId, seatedFor: this.now() - seat!.seated_at });
+    });
+    this.events.publish(`table:${tableId}`, 'table.changed', {});
+    return { ok: true };
+  }
+
+  seats(tableId: string) {
+    return this.db.all(
+      `SELECT s.player_id AS playerId, p.display_name AS displayName, l.username, o.name AS operator, s.seated_at AS seatedAt
+       FROM seats s JOIN players p ON p.id = s.player_id JOIN operators o ON o.id = p.operator_id LEFT JOIN player_logins l ON l.player_id = p.id
+       WHERE s.table_id = ? ORDER BY s.seated_at`,
+      tableId,
+    );
+  }
+
+  seatOf(playerId: string): string | null {
+    return this.db.get<{ table_id: string }>('SELECT table_id FROM seats WHERE player_id = ?', playerId)?.table_id ?? null;
+  }
+
+  assertNotSeated(tableId: string, playerId: string) {
+    if (this.seatOf(playerId) === tableId)
+      fail(403, 'SEATED_AT_TABLE', "You're playing at this table, so you can't bet on its flop. Bet on another table.");
   }
 
   // ---------- rounds ----------
@@ -312,6 +381,7 @@ export class Game {
 
     const r = this.round(str(input.roundId, 'roundId', 64));
     if (r.status !== 'open' || this.now() >= r.closes_at) fail(409, 'BETTING_CLOSED');
+    this.assertNotSeated(r.table_id, player.id);
     const t = this.table(r.table_id);
     if (t.status !== 'active') fail(409, 'TABLE_INACTIVE');
     const market = MARKETS.get(str(input.marketId, 'marketId', 40)) ?? fail(400, 'UNKNOWN_MARKET');

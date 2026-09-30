@@ -140,6 +140,16 @@ CREATE TABLE IF NOT EXISTS audit (
   hash TEXT NOT NULL
 );
 
+-- Players physically seated at a table see their own hole cards, so they may not bet on that
+-- table's flop. A player sits at one table at a time.
+CREATE TABLE IF NOT EXISTS seats (
+  player_id TEXT PRIMARY KEY REFERENCES players(id),
+  table_id TEXT NOT NULL REFERENCES tables(id),
+  seated_at INTEGER NOT NULL,
+  seated_by TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS seats_by_table ON seats (table_id);
+
 CREATE TABLE IF NOT EXISTS player_logins (
   player_id TEXT PRIMARY KEY REFERENCES players(id),
   username TEXT NOT NULL UNIQUE,
