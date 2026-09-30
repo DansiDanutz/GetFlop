@@ -1,5 +1,7 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-  <!-- GetFlop app mark: the three flop cards fanned on the felt, inside a gold table rail. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 520 128">
+  <!-- Horizontal lockup: app mark + wordmark, for the app's dark felt background. Generated from icon.svg. -->
+  <svg x="0" y="0" width="128" height="128" viewBox="0 0 512 512">
+  
   <defs>
     <radialGradient id="felt" cx="50%" cy="35%" r="75%">
       <stop offset="0" stop-color="#16614a"/><stop offset=".6" stop-color="#0d3b2e"/><stop offset="1" stop-color="#072319"/>
@@ -20,4 +22,6 @@
   <circle cx="256" cy="420" r="30" fill="#f2c14e"/>
   <circle cx="256" cy="420" r="30" fill="none" stroke="#1d1600" stroke-width="6" stroke-dasharray="10 9.6" opacity=".55"/>
   <circle cx="256" cy="420" r="16" fill="none" stroke="#1d1600" stroke-width="3" opacity=".55"/>
+</svg>
+  <text x="152" y="88" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" font-size="72" font-weight="800" letter-spacing="1" fill="#eef5f1">Get<tspan fill="#f2c14e">Flop</tspan></text>
 </svg>

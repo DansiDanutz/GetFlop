@@ -36,6 +36,9 @@ export class Ledger {
     return this.db.tx(async () => {
       const id = newId('tx');
       await this.db.run('INSERT INTO ledger_tx (id, kind, ref, created_at) VALUES (?, ?, ?, ?)', id, kind, ref, this.now());
+      // A database-wide sequence number gives every movement its place in time, across all app
+      // servers. Movements on the same balance conflict, so a later one always gets a higher number.
+      await this.db.run('INSERT INTO ledger_order (tx_id) VALUES (?)', id);
       for (const e of entries) {
         if (e.amount === 0) continue;
         await this.db.run('INSERT INTO ledger_entries (tx_id, account, currency, amount) VALUES (?, ?, ?, ?)', id, e.account, currency, e.amount);

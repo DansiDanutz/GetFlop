@@ -19,6 +19,7 @@
 import { type Flop, flopIndex, formatCard, parseFlop } from './cards.ts';
 import { MARKETS, payoutFor, priceList, priceX100, TOTAL_FLOPS } from './markets.ts';
 import type { Db, Row } from './db.ts';
+import type { SaferPlay } from './safer.ts';
 import type { Ledger } from './ledger.ts';
 import type { Audit } from './audit.ts';
 import type { Events } from './events.ts';
@@ -60,8 +61,10 @@ export class Game {
   private events: Events;
   private wallet: SeamlessWallet;
   private now: () => number;
+  readonly safer: SaferPlay;
 
-  constructor(db: Db, ledger: Ledger, audit: Audit, events: Events, wallet: SeamlessWallet, now: () => number) {
+  constructor(db: Db, ledger: Ledger, audit: Audit, events: Events, wallet: SeamlessWallet, now: () => number, safer: SaferPlay) {
+    this.safer = safer;
     this.db = db;
     this.ledger = ledger;
     this.audit = audit;
@@ -130,8 +133,17 @@ export class Game {
     const rows = await this.db.all(`SELECT * FROM tables ${includeInactive ? '' : "WHERE status = 'active'"} ORDER BY name`);
     const out = [];
     for (const t of rows) {
-      const round = await this.currentRound(t.id);
-      out.push({ ...publicTable(t), round: round ? await this.publicRound(round) : null });
+      // Like tableView: between hands the last result stays until the dealer opens the next one.
+      const round = (await this.currentRound(t.id)) ?? (await this.db.get('SELECT * FROM rounds WHERE table_id = ? ORDER BY number DESC LIMIT 1', t.id));
+      // The lobby shows every table live: its odds, the hand in play and the last flops.
+      const recent = (await this.db.all("SELECT number, flop FROM rounds WHERE table_id = ? AND status = 'settled' ORDER BY number DESC LIMIT 5", t.id))
+        .map((r) => ({ number: r.number, flop: JSON.parse(r.flop) }));
+      out.push({
+        ...publicTable(t),
+        markets: priceList(t.margin_bps).map((m) => ({ id: m.id, name: m.name, oddsX100: m.oddsX100 })),
+        round: round ? await this.publicRound(round) : null,
+        recent,
+      });
     }
     return out;
   }
@@ -142,7 +154,7 @@ export class Game {
     // Between hands the last result stays on screen until the dealer opens the next round.
     const round = (await this.currentRound(tableId)) ?? (await this.db.get('SELECT * FROM rounds WHERE table_id = ? ORDER BY number DESC LIMIT 1', tableId));
     const history = (await this.db.all("SELECT number, flop, settled_at FROM rounds WHERE table_id = ? AND status = 'settled' ORDER BY number DESC LIMIT 20", tableId))
-      .map((r) => ({ number: r.number, flop: JSON.parse(r.flop), at: r.settled_at }));
+      .map((r) => { const flop = JSON.parse(r.flop); return { number: r.number, flop, at: r.settled_at, winningMarkets: winningMarkets(flop) }; });
     return {
       table: publicTable(t),
       markets: priceList(t.margin_bps).map(({ houseEdge: _h, ...m }) => m),
@@ -282,7 +294,9 @@ export class Game {
   }
 
   // The dealer (and, on dual-confirm tables, a second staff member) enters the flop.
-  async submitFlop(roundId: string, cards: unknown, actor: string) {
+  // firstEntryOnly: the entry may start a dual confirmation but never complete one (the table
+  // camera is never the second person).
+  async submitFlop(roundId: string, cards: unknown, actor: string, opts: { firstEntryOnly?: boolean } = {}) {
     let flop: Flop;
     try { flop = parseFlop(cards); } catch (e: any) { return fail(400, 'BAD_FLOP', e.message); }
     const text = JSON.stringify(flop.map(formatCard));
@@ -297,7 +311,7 @@ export class Game {
           await this.audit.log(actor, 'round.flop_entered', { roundId, flop: JSON.parse(text) });
           return { r, outcome: 'pending' as const };
         }
-        if (r.pending_by === actor) fail(409, 'NEEDS_SECOND_PERSON', 'A different staff member must confirm the flop');
+        if (r.pending_by === actor || opts.firstEntryOnly) fail(409, 'NEEDS_SECOND_PERSON', 'A different staff member must confirm the flop');
         if (!sameFlop(r.pending_flop, text)) {
           await this.db.run('UPDATE rounds SET pending_flop = NULL, pending_by = NULL WHERE id = ?', roundId);
           await this.audit.log(actor, 'round.flop_mismatch', { roundId, first: JSON.parse(r.pending_flop), second: JSON.parse(text), firstBy: r.pending_by });
@@ -400,6 +414,7 @@ export class Game {
       if (op.status !== 'active') fail(403, 'OPERATOR_SUSPENDED');
       const fresh = await this.db.get<PlayerRow>('SELECT status FROM players WHERE id = ?', player.id);
       if (fresh?.status !== 'active') fail(403, 'PLAYER_BLOCKED');
+      await this.safer.assertCanPlay(player, stake, op.currency);
       const r = await this.round(roundId);
       if (r.status !== 'open' || this.now() >= r.closes_at) fail(409, 'BETTING_CLOSED');
       await this.assertNotSeated(r.table_id, player.id);

@@ -110,6 +110,13 @@ CREATE TABLE IF NOT EXISTS ledger_tx (
   UNIQUE (kind, ref)
 );
 
+-- Order in which ledger transactions were written (a separate table so existing databases get it
+-- without a migration; transactions written before it existed have no row and sort by time).
+CREATE TABLE IF NOT EXISTS ledger_order (
+  seq INTEGER PRIMARY KEY AUTOINCREMENT,
+  tx_id TEXT NOT NULL UNIQUE REFERENCES ledger_tx(id)
+);
+
 CREATE TABLE IF NOT EXISTS ledger_entries (
   tx_id TEXT NOT NULL REFERENCES ledger_tx(id),
   account TEXT NOT NULL,
@@ -162,6 +169,48 @@ CREATE TABLE IF NOT EXISTS player_logins (
   player_id TEXT PRIMARY KEY REFERENCES players(id),
   username TEXT NOT NULL UNIQUE,
   password_hash TEXT NOT NULL
+);
+
+-- The camera over each table (see camera.ts): its mode, the latest picture, when the host device
+-- was last heard from. One row per table that has had a camera.
+CREATE TABLE IF NOT EXISTS table_cameras (
+  table_id TEXT PRIMARY KEY REFERENCES tables(id),
+  mode TEXT NOT NULL DEFAULT 'assist' CHECK (mode IN ('off','assist','auto')),
+  frame TEXT,
+  frame_at INTEGER,
+  host_seen_at INTEGER,
+  updated_at INTEGER NOT NULL
+);
+
+-- Every AI reading of a flop. The picture is kept for the reading that was acted on, as evidence.
+CREATE TABLE IF NOT EXISTS flop_readings (
+  seq INTEGER PRIMARY KEY AUTOINCREMENT,
+  id TEXT NOT NULL UNIQUE,
+  round_id TEXT NOT NULL REFERENCES rounds(id),
+  table_id TEXT NOT NULL,
+  at INTEGER NOT NULL,
+  cards TEXT,
+  confidence INTEGER NOT NULL,
+  outcome TEXT NOT NULL,
+  note TEXT,
+  model TEXT,
+  image TEXT,
+  image_hash TEXT,
+  by_actor TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS flop_readings_by_round ON flop_readings (round_id, seq);
+CREATE INDEX IF NOT EXISTS flop_readings_by_picture ON flop_readings (table_id, image_hash);
+
+-- Safer-play settings of direct players (see safer.ts). Amounts in minor units; NULL = no limit.
+CREATE TABLE IF NOT EXISTS player_limits (
+  player_id TEXT PRIMARY KEY REFERENCES players(id),
+  loss_day INTEGER,
+  loss_week INTEGER,
+  deposit_week INTEGER,
+  pending TEXT,
+  pending_from INTEGER,
+  excluded_until INTEGER,
+  updated_at INTEGER NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS tournaments (

@@ -5,6 +5,8 @@ import type { Ledger } from './ledger.ts';
 import type { Audit } from './audit.ts';
 import type { OperatorRow } from './wallet.ts';
 import type { PlayerRow } from './game.ts';
+import type { SaferPlay } from './safer.ts';
+import { MARKETS } from './markets.ts';
 import { checkPassword, fail, hashPassword, int, newId, newSecret, optStr, safeEqual, sha256, signPayload, str } from './util.ts';
 
 const PLAYER_SESSION_MS = 12 * 3600_000;
@@ -16,8 +18,10 @@ export class Accounts {
   private ledger: Ledger;
   private audit: Audit;
   private now: () => number;
+  private safer: SaferPlay;
 
-  constructor(db: Db, ledger: Ledger, audit: Audit, now: () => number) {
+  constructor(db: Db, ledger: Ledger, audit: Audit, now: () => number, safer: SaferPlay) {
+    this.safer = safer;
     this.db = db;
     this.ledger = ledger;
     this.audit = audit;
@@ -205,10 +209,104 @@ export class Accounts {
     const op = await this.operator('op_direct');
     const why = str(note, 'note', 200);
     await this.db.tx(async () => {
+      if (amount > 0) await this.safer.assertCanDeposit(player!.id, amount, op.currency);
       await this.ledger.transfer(amount > 0 ? 'cashier.deposit' : 'cashier.withdraw', null, op.currency, 'house:cashier', `player:${player!.id}`, amount);
       await this.audit.log(actor, 'player.cashier', { playerId, amount, note: why });
     });
     return { playerId, balance: await this.ledger.balance(`player:${player!.id}`, op.currency), currency: op.currency };
+  }
+
+  // ---------- the player's own account ----------
+
+  // Money in and out of the player's balance, newest first, each line with the balance after it.
+  async statement(player: PlayerRow, currency: string, limit = 50) {
+    // Movements and the current balance in one transaction, so the balances shown line up exactly.
+    const { rows, current } = await this.db.tx(async () => ({
+      rows: await this.db.all<{ id: string; kind: string; ref: string | null; at: number; amount: number }>(
+        `SELECT t.id, t.kind, t.ref, t.created_at AS at, e.amount FROM ledger_entries e JOIN ledger_tx t ON t.id = e.tx_id
+         LEFT JOIN ledger_order o ON o.tx_id = t.id
+         WHERE e.account = ? AND e.currency = ?
+         ORDER BY CASE WHEN o.seq IS NULL THEN 0 ELSE 1 END DESC, o.seq DESC, t.created_at DESC, t.id DESC LIMIT ?`,
+        `player:${player.id}`, currency, limit,
+      ),
+      current: await this.ledger.balance(`player:${player.id}`, currency),
+    }));
+    const betIds = rows.filter((r) => ['bet', 'settle', 'refund'].includes(r.kind) && r.ref).map((r) => r.ref!);
+    const bets = new Map<string, Row>();
+    for (const id of new Set(betIds)) {
+      const b = await this.db.get(
+        `SELECT b.id, b.market_id, r.number, t.name AS table_name FROM bets b JOIN rounds r ON r.id = b.round_id JOIN tables t ON t.id = r.table_id WHERE b.id = ?`, id);
+      if (b) bets.set(id, b);
+    }
+    const tourIds = new Set(rows.filter((r) => r.kind.startsWith('tournament.') && r.ref).map((r) => r.ref!.split(':')[0]));
+    const tours = new Map<string, string>();
+    for (const id of tourIds) {
+      const t = await this.db.get<{ name: string }>('SELECT name FROM tournaments WHERE id = ?', id);
+      if (t) tours.set(id, t.name);
+    }
+    let balance = current;
+    return rows.map((r) => {
+      const amount = Number(r.amount);
+      const line = { at: Number(r.at), kind: r.kind, amount, balanceAfter: balance, text: describe(r.kind, amount, r.ref, bets, tours) };
+      balance -= amount;
+      return line;
+    });
+  }
+
+  // Cash betting record: settled bets only for the results, open ones counted as in play.
+  async bettingStats(playerId: string) {
+    const row = await this.db.get(
+      `SELECT COUNT(*) AS bets,
+              COALESCE(SUM(stake), 0) AS staked,
+              COALESCE(SUM(CASE WHEN status = 'won' THEN 1 ELSE 0 END), 0) AS won,
+              COALESCE(SUM(CASE WHEN status IN ('won','lost') THEN 1 ELSE 0 END), 0) AS settled,
+              COALESCE(SUM(CASE WHEN status IN ('won','lost') THEN COALESCE(payout, 0) - stake ELSE 0 END), 0) AS net,
+              COALESCE(MAX(CASE WHEN status = 'won' THEN payout - stake END), 0) AS best,
+              COALESCE(SUM(CASE WHEN status IN ('open','pending') THEN stake ELSE 0 END), 0) AS in_play
+       FROM bets WHERE player_id = ? AND status IN ('open','pending','won','lost')`,
+      playerId,
+    );
+    const n = (k: string) => Number(row?.[k] ?? 0);
+    return { bets: n('bets'), staked: n('staked'), won: n('won'), settled: n('settled'), net: n('net'), biggestWin: n('best'), inPlay: n('in_play') };
+  }
+
+  async playerTournaments(playerId: string) {
+    return (await this.db.all(
+      `SELECT t.id, t.name, t.status, t.currency, t.buy_in, t.ends_at, e.points, e.bets_used, e.rank, e.prize, e.joined_at
+       FROM tournament_entries e JOIN tournaments t ON t.id = e.tournament_id WHERE e.player_id = ? ORDER BY e.joined_at DESC LIMIT 20`,
+      playerId,
+    )).map((r) => ({
+      id: r.id, name: r.name, status: r.status, currency: r.currency, buyIn: Number(r.buy_in), endsAt: Number(r.ends_at),
+      points: Number(r.points), betsUsed: Number(r.bets_used), rank: r.rank === null ? null : Number(r.rank), prize: Number(r.prize), joinedAt: Number(r.joined_at),
+    }));
+  }
+
+  async login(playerId: string) {
+    return (await this.db.get<{ username: string }>('SELECT username FROM player_logins WHERE player_id = ?', playerId))?.username ?? null;
+  }
+
+  async updateProfile(player: PlayerRow, input: Row) {
+    const displayName = str(input.displayName, 'displayName', 40, 2).trim();
+    if (displayName.length < 2) fail(400, 'BAD_INPUT', 'displayName must be at least 2 characters');
+    await this.db.tx(async () => {
+      await this.db.run('UPDATE players SET display_name = ? WHERE id = ?', displayName, player.id);
+      await this.audit.log(`player:${player.id}`, 'player.profile', { displayName });
+    });
+    return { displayName };
+  }
+
+  // Direct players only (partner players sign in through their site). Other sessions are signed out.
+  async changePassword(player: PlayerRow, input: Row, keepToken: string) {
+    const row = (await this.db.get('SELECT * FROM player_logins WHERE player_id = ?', player.id)) ?? fail(409, 'NOT_DIRECT_PLAYER', 'Your password is managed by the site you play through');
+    if (!checkPassword(String(input.currentPassword ?? ''), row!.password_hash)) fail(401, 'BAD_CREDENTIALS', 'Current password is wrong');
+    const next = str(input.newPassword, 'newPassword', 200, 8);
+    const hash = hashPassword(next);
+    await this.db.tx(async () => {
+      await this.db.run('UPDATE player_logins SET password_hash = ? WHERE player_id = ?', hash, player.id);
+      await this.db.run("DELETE FROM sessions WHERE kind = 'player' AND subject_id = ? AND token_hash != ?", player.id, sha256(keepToken));
+      await this.audit.log(`player:${player.id}`, 'player.password_changed', {});
+    });
+    return { ok: true };
   }
 
   // ---------- sessions ----------
@@ -275,4 +373,23 @@ export function publicOperator(op: OperatorRow) {
     id: op.id, name: op.name, currency: op.currency, walletMode: op.wallet_mode, walletUrl: op.wallet_url,
     apiKey: op.api_key, commissionBps: op.commission_bps, status: op.status,
   };
+}
+
+// One statement line in plain words.
+function describe(kind: string, amount: number, ref: string | null, bets: Map<string, Row>, tours: Map<string, string>) {
+  const b = ref ? bets.get(ref) : undefined;
+  const hand = b ? `${MARKETS.get(b.market_id)?.name ?? b.market_id} · ${b.table_name} #${b.number}` : '';
+  const tour = ref ? tours.get(ref.split(':')[0]) ?? '' : '';
+  switch (kind) {
+    case 'cashier.deposit': return 'Deposit at the desk';
+    case 'cashier.withdraw': return 'Withdrawal at the desk';
+    case 'operator.transfer': case 'deposit': case 'withdraw': return amount >= 0 ? 'Transfer in' : 'Transfer out';
+    case 'bet': return `Bet · ${hand}`;
+    case 'settle': return `Win · ${hand}`;
+    case 'refund': return `Bet returned · ${hand}`;
+    case 'tournament.buy_in': return `Tournament buy-in · ${tour}`;
+    case 'tournament.prize': return `Tournament prize · ${tour}`;
+    case 'tournament.refund': return `Buy-in returned · ${tour}`;
+    default: return kind;
+  }
 }

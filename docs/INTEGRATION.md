@@ -84,7 +84,7 @@ GET /v1/operator/bets?from=<ms>&to=<ms>&limit=1000     every bet of your players
                                                        { bets: [...], nextCursor } - repeat with &cursor=<nextCursor> until it is null
 GET /v1/operator/reports/ggr?from=<ms>&to=<ms>         stakes, payouts, GGR, commission estimate
 GET /v1/operator/invoices                              issued invoices
-GET /v1/operator/tables                                live tables for your lobby
+GET /v1/operator/tables                                live tables for your lobby: limits, odds per market, the hand in play (or the last result) and the last 5 flops
 POST /v1/operator/players/status { playerId, status: "blocked" | "active" }   responsible-gambling / fraud blocks
 ```
 

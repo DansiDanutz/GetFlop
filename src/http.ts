@@ -24,6 +24,7 @@ export type Handler = (req: Req) => unknown | Promise<unknown>;
 type Route = { method: string; parts: string[]; handler: Handler };
 
 const MAX_BODY = 64 * 1024;
+const MAX_UPLOAD = 1024 * 1024; // camera pictures from the table host (/v1/host/...)
 
 export class Router {
   private routes: Route[] = [];
@@ -52,13 +53,13 @@ export class Router {
   }
 }
 
-export function readBody(req: IncomingMessage): Promise<string> {
+export function readBody(req: IncomingMessage, limit = MAX_BODY): Promise<string> {
   return new Promise((resolve, reject) => {
     let size = 0;
     const chunks: Buffer[] = [];
     req.on('data', (c: Buffer) => {
       size += c.length;
-      if (size > MAX_BODY) { reject(new AppError(413, 'BODY_TOO_LARGE')); req.destroy(); return; }
+      if (size > limit) { reject(new AppError(413, 'BODY_TOO_LARGE')); req.destroy(); return; }
       chunks.push(c);
     });
     req.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
@@ -84,12 +85,18 @@ export function openStream(res: ServerResponse) {
 
 export const STREAMED = Symbol('streamed'); // handler already wrote the response
 
+export function sendJpeg(res: ServerResponse, data: Buffer) {
+  res.writeHead(200, { 'content-type': 'image/jpeg', 'cache-control': 'no-store', 'content-length': data.length, 'x-content-type-options': 'nosniff' });
+  res.end(data);
+  return STREAMED;
+}
+
 export async function dispatch(router: Router, raw: IncomingMessage, res: ServerResponse, onError: (e: unknown) => void) {
   const url = new URL(raw.url ?? '/', 'http://local');
   try {
     const found = router.match(raw.method ?? 'GET', url.pathname);
     if (!found) throw new AppError(404, 'NOT_FOUND');
-    const rawBody = raw.method === 'GET' || raw.method === 'HEAD' ? '' : await readBody(raw);
+    const rawBody = raw.method === 'GET' || raw.method === 'HEAD' ? '' : await readBody(raw, url.pathname.startsWith('/v1/host/') ? MAX_UPLOAD : MAX_BODY);
     let body: any = {};
     if (rawBody) {
       try { body = JSON.parse(rawBody); } catch { throw new AppError(400, 'BAD_JSON'); }

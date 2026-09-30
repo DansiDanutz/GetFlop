@@ -1,0 +1,97 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630">
+  <!-- Social share image (Open Graph / X card), 1200x630. Generated from icon.svg and hero.svg. -->
+  <defs>
+    <radialGradient id="felt" cx="50%" cy="0%" r="90%">
+      <stop offset="0" stop-color="#1a6b51"/><stop offset=".55" stop-color="#0f4535"/><stop offset="1" stop-color="#082a20"/>
+    </radialGradient>
+    <linearGradient id="rail" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#5a3a1c"/><stop offset="1" stop-color="#2e1c0c"/></linearGradient>
+    <radialGradient id="lamp" cx="50%" cy="10%" r="60%"><stop offset="0" stop-color="#fff6d6" stop-opacity=".18"/><stop offset="1" stop-color="#fff6d6" stop-opacity="0"/></radialGradient>
+    <filter id="sh" x="-30%" y="-30%" width="160%" height="160%"><feDropShadow dx="0" dy="8" stdDeviation="8" flood-color="#000" flood-opacity=".5"/></filter>
+    <path id="heart" d="M50 88C20 65 5 48 5 30 5 15 17 5 30 5c10 0 17 6 20 13 3-7 10-13 20-13 13 0 25 10 25 25 0 18-15 35-45 58z"/>
+    <path id="spade" d="M50 5c30 25 45 40 45 55 0 15-12 23-24 23-9 0-16-5-19-11l6 23H42l6-23c-3 6-10 11-19 11C17 83 5 75 5 60 5 45 20 30 50 5z"/>
+    <path id="diamond" d="M50 4 88 50 50 96 12 50z"/>
+    <g id="chip">
+      <circle r="26" fill="currentColor"/>
+      <circle r="26" fill="none" stroke="#fff" stroke-width="7" stroke-dasharray="9 11.4" opacity=".9"/>
+      <circle r="15" fill="none" stroke="#fff" stroke-width="2" opacity=".6"/>
+    </g>
+  </defs>
+  <rect width="1200" height="630" fill="#082a20"/>
+  <svg x="0" y="176" width="1200" height="454" viewBox="0 0 1200 420" preserveAspectRatio="xMidYMin slice">
+  <!-- table -->
+  <path d="M-40 420 C 80 60, 1120 60, 1240 420 Z" fill="url(#rail)"/>
+  <path d="M0 420 C 110 92, 1090 92, 1200 420 Z" fill="url(#felt)"/>
+  <path d="M0 420 C 110 92, 1090 92, 1200 420 Z" fill="url(#lamp)"/>
+  <path d="M170 420 C 250 205, 950 205, 1030 420" fill="none" stroke="#f2c14e" stroke-width="2" opacity=".35" stroke-dasharray="2 10" stroke-linecap="round"/>
+  <text x="600" y="395" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="22" letter-spacing="8" fill="#f2c14e" opacity=".45">BET THE FLOP</text>
+  <!-- the flop -->
+  <g filter="url(#sh)" font-family="Georgia, 'Times New Roman', serif" font-weight="700">
+    <g transform="translate(468 150)">
+      <rect width="80" height="112" rx="9" fill="#fff"/>
+      <text x="10" y="30" font-size="26" fill="#10271f">A</text>
+      <use href="#spade" fill="#10271f" transform="translate(20 38) scale(.4)"/>
+    </g>
+    <g transform="translate(560 150)">
+      <rect width="80" height="112" rx="9" fill="#fff"/>
+      <text x="10" y="30" font-size="26" fill="#d42a3a">K</text>
+      <use href="#heart" fill="#d42a3a" transform="translate(20 40) scale(.4)"/>
+    </g>
+    <g transform="translate(652 150)">
+      <rect width="80" height="112" rx="9" fill="#fff"/>
+      <text x="10" y="30" font-size="26" fill="#d42a3a">7</text>
+      <use href="#diamond" fill="#d42a3a" transform="translate(20 38) scale(.4)"/>
+    </g>
+  </g>
+  <!-- the deck, top card face down -->
+  <g filter="url(#sh)" transform="translate(800 120) rotate(8)">
+    <rect x="4" y="4" width="64" height="90" rx="7" fill="#e9e2d0"/>
+    <rect width="64" height="90" rx="7" fill="#fff"/>
+    <rect x="4" y="4" width="56" height="82" rx="5" fill="#8f2530"/>
+    <circle cx="32" cy="45" r="12" fill="#0d3b2e" stroke="#f2c14e" stroke-width="2"/>
+  </g>
+  <!-- dealer button -->
+  <g filter="url(#sh)" transform="translate(372 196)">
+    <circle r="22" fill="#fff"/><circle r="17" fill="none" stroke="#10271f" stroke-width="1.5"/>
+    <text y="6" text-anchor="middle" font-family="system-ui, sans-serif" font-size="14" font-weight="800" fill="#10271f">D</text>
+  </g>
+  <!-- bets on the felt, with their odds -->
+  <g font-family="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" font-weight="800" text-anchor="middle">
+    <g transform="translate(270 318)" filter="url(#sh)">
+      <use href="#chip" color="#d42a3a" y="8"/><use href="#chip" color="#d42a3a"/>
+    </g>
+    <text x="270" y="366" font-size="15" fill="#eef5f1">Rainbow</text><text x="270" y="386" font-size="17" fill="#f2c14e">2.38</text>
+    <g transform="translate(430 330)" filter="url(#sh)"><use href="#chip" color="#2f6fd6"/></g>
+    <text x="430" y="378" font-size="15" fill="#eef5f1">Has an Ace</text><text x="430" y="398" font-size="17" fill="#f2c14e">4.37</text>
+    <g transform="translate(770 330)" filter="url(#sh)"><use href="#chip" color="#1d1d1d" y="8"/><use href="#chip" color="#1d1d1d"/></g>
+    <text x="770" y="378" font-size="15" fill="#eef5f1">All red</text><text x="770" y="398" font-size="17" fill="#f2c14e">8.07</text>
+    <g transform="translate(930 318)" filter="url(#sh)"><use href="#chip" color="#2e9e5b"/></g>
+    <text x="930" y="366" font-size="15" fill="#eef5f1">Paired</text><text x="930" y="386" font-size="17" fill="#f2c14e">5.60</text>
+  </g>
+</svg>
+  <svg x="72" y="52" width="96" height="96" viewBox="0 0 512 512">
+  
+  <defs>
+    <radialGradient id="i-felt" cx="50%" cy="35%" r="75%">
+      <stop offset="0" stop-color="#16614a"/><stop offset=".6" stop-color="#0d3b2e"/><stop offset="1" stop-color="#072319"/>
+    </radialGradient>
+    <filter id="i-sh" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="0" dy="10" stdDeviation="10" flood-color="#000" flood-opacity=".45"/></filter>
+    <path id="i-heart" d="M50 88C20 65 5 48 5 30 5 15 17 5 30 5c10 0 17 6 20 13 3-7 10-13 20-13 13 0 25 10 25 25 0 18-15 35-45 58z"/>
+    <path id="i-spade" d="M50 5c30 25 45 40 45 55 0 15-12 23-24 23-9 0-16-5-19-11l6 23H42l6-23c-3 6-10 11-19 11C17 83 5 75 5 60 5 45 20 30 50 5z"/>
+    <path id="i-diamond" d="M50 4 88 50 50 96 12 50z"/>
+    <g id="i-card"><rect x="-78" y="-110" width="156" height="220" rx="20" fill="#fff"/></g>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="url(#i-felt)"/>
+  <rect x="22" y="22" width="468" height="468" rx="94" fill="none" stroke="#f2c14e" stroke-width="12" opacity=".9"/>
+  <g filter="url(#i-sh)">
+    <g transform="translate(168 262) rotate(-16)"><use href="#i-card"/><use href="#i-heart" fill="#d42a3a" transform="translate(-68 -92) scale(.5)"/></g>
+    <g transform="translate(344 262) rotate(16)"><use href="#i-card"/><use href="#i-diamond" fill="#d42a3a" transform="translate(18 -92) scale(.5)"/></g>
+    <g transform="translate(256 238)"><use href="#i-card"/><use href="#i-spade" fill="#10271f" transform="translate(-44 -48) scale(.88)"/></g>
+  </g>
+  <circle cx="256" cy="420" r="30" fill="#f2c14e"/>
+  <circle cx="256" cy="420" r="30" fill="none" stroke="#1d1600" stroke-width="6" stroke-dasharray="10 9.6" opacity=".55"/>
+  <circle cx="256" cy="420" r="16" fill="none" stroke="#1d1600" stroke-width="3" opacity=".55"/>
+</svg>
+  <text x="188" y="118" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" font-size="56" font-weight="800" fill="#eef5f1">Get<tspan fill="#f2c14e">Flop</tspan></text>
+  <text x="1128" y="100" text-anchor="end" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" font-size="50" font-weight="800" fill="#eef5f1">Bet the flop. Live.</text>
+  <text x="1128" y="140" text-anchor="end" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" font-size="22" fill="#9bb5aa">Real dealers · real cards · prize-pool tournaments</text>
+</svg>

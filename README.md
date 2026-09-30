@@ -22,7 +22,7 @@ No frameworks and no runtime dependencies. Everything runs on what ships with No
 
 ```bash
 npm run demo     # in-memory demo with staff, a table, players and a tournament; prints the links
-npm test         # 30 tests: pricing, ledger, rounds, risk limits, seating, wallets, API, commission, tournaments
+npm test         # 44 tests: pricing, ledger, rounds, risk limits, seating, wallets, API, commission, tournaments, safer play, account, lobby, camera
 TEST_DATABASE_URL=postgres://... npm test   # the same tests against PostgreSQL (the database is wiped first)
 npm run odds     # the price list: exact probabilities and odds at a given margin (npm run odds -- 300)
 ```
@@ -32,6 +32,8 @@ Production-style start (data kept in `data/getflop.db`):
 ```bash
 ADMIN_USERNAME=owner ADMIN_PASSWORD='a-long-password' PUBLIC_URL=https://play.example.com npm start
 ```
+
+AI flop reading from the table cameras needs `ANTHROPIC_API_KEY` (see [docs/CAMERA.md](docs/CAMERA.md)); without it the live camera picture still works and dealers enter the flop by hand.
 
 With PostgreSQL instead (any host; several servers can share it), add `DATABASE_URL=postgres://user:pass@host:5432/db`. The connection is encrypted by default; add `?sslmode=verify-full` to also check the server certificate, or `?sslmode=disable` for a local database. Tables are created on first start.
 
@@ -59,8 +61,10 @@ Put it behind HTTPS (any reverse proxy, e.g. Caddy or nginx). Live updates use S
 | Screen | URL | Who |
 |---|---|---|
 | Sign up / log in | `/` | players |
-| Play | `/play.html` | players (or partner launch links) |
+| Play | `/play.html` | players (or partner launch links): the lobby with every table live (bet from it), each table, tournaments, bet history, and My account (balance, statement, stats, limits, name and password) |
 | Dealer console | `/dealer.html` | dealers, supervisors |
+| Table host | `/host.html` | the camera device above each table: sends the live picture and has the flop read by AI ([docs/CAMERA.md](docs/CAMERA.md)) |
+| Table TV | `/tv.html?table=…` | the screen in the room: countdown, odds, bets per market, the flop, winners, last flops, tournament top 5 (link in the dealer console) |
 | Admin | `/admin.html` | admins: tables, partners, players & cashier, tournaments, commission, audit |
 
 ## Code map
@@ -76,7 +80,10 @@ Put it behind HTTPS (any reverse proxy, e.g. Caddy or nginx). Live updates use S
 | `src/wallet.ts` | Seamless wallet calls to partners, with a retrying outbox |
 | `src/accounts.ts` | Partners and request signing, players, sign-up, cashier, staff, sessions |
 | `src/tournaments.ts` | Tournament engine and strategies (first: points race) |
+| `src/safer.ts` | Safer play for direct players: loss and deposit limits, time-outs, self-exclusion |
+| `src/camera.ts`, `src/vision.ts` | Table cameras: live pictures from the host device, AI flop reading (Claude vision) and when a reading is trusted |
 | `src/billing.ts` | GGR reports and commission invoices with carry-forward |
 | `src/audit.ts` | Hash-chained audit log |
 | `src/http.ts`, `src/app.ts` | HTTP toolkit and the API routes |
-| `public/` | Player, dealer and admin screens |
+| `public/` | Player, dealer, admin and TV screens |
+| `public/icon.svg`, `public/img/` | Brand images, drawn as SVG: app mark, logo, card back, landing art, share image; the PNG icons and `og.png` are rendered from them. `manifest.webmanifest` makes the app installable on phones |

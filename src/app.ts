@@ -13,9 +13,12 @@ import { type FetchFn, SeamlessWallet } from './wallet.ts';
 import { Game, type PlayerRow } from './game.ts';
 import { Accounts } from './accounts.ts';
 import { Billing } from './billing.ts';
+import { SaferPlay } from './safer.ts';
+import { Camera } from './camera.ts';
+import { claudeVision, type VisionFn } from './vision.ts';
 import { STRATEGIES, Tournaments } from './tournaments.ts';
 import { DEMO_STAFF } from './seed.ts';
-import { dispatch, openStream, type Req, Router, serveStatic, STREAMED } from './http.ts';
+import { dispatch, openStream, type Req, Router, sendJpeg, serveStatic, STREAMED } from './http.ts';
 import { fail, int, newSecret, str } from './util.ts';
 import { MARKETS, priceList } from './markets.ts';
 
@@ -30,6 +33,8 @@ export type AppOptions = {
   demo?: boolean;
   // Serverless hosting has no background timers: advance round/tournament clocks on each request.
   tickOnRequest?: boolean;
+  // Reads the flop from camera pictures. Default: Claude, when ANTHROPIC_API_KEY is set; null turns it off.
+  vision?: VisionFn | null;
 };
 
 const ROLE_RANK: Record<string, number> = { dealer: 1, supervisor: 2, admin: 3 };
@@ -43,10 +48,13 @@ export async function createApp(opts: AppOptions = {}) {
   const ledger = new Ledger(db, now);
   const events = new Events();
   const wallet = new SeamlessWallet(db, audit, now, opts.fetchFn);
-  const game = new Game(db, ledger, audit, events, wallet, now);
-  const accounts = new Accounts(db, ledger, audit, now);
+  const safer = new SaferPlay(db, audit, now);
+  const game = new Game(db, ledger, audit, events, wallet, now, safer);
+  const accounts = new Accounts(db, ledger, audit, now, safer);
   const billing = new Billing(db, audit, now);
   const tournaments = new Tournaments(db, ledger, audit, events, game, now);
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  const camera = new Camera(db, audit, events, game, now, opts.vision !== undefined ? opts.vision : apiKey ? claudeVision(apiKey) : null);
   await accounts.directOperator(opts.directCurrency ?? 'EUR');
 
   const bearer = (req: Req) => {
@@ -79,8 +87,10 @@ export async function createApp(opts: AppOptions = {}) {
   // ----- public + player -----
   r.get('/v1/health', () => ({ ok: true, time: now() }));
   r.get('/v1/markets', () => [...MARKETS.values()].map((m) => ({ id: m.id, group: m.group, name: m.name, probability: m.probability, winningFlops: m.winningFlops })));
-  r.get('/v1/tables', () => game.listTables());
-  r.get('/v1/tables/:id', (req) => game.tableView(req.params.id));
+  r.get('/v1/tables', async () => Promise.all((await game.listTables()).map(async (t) => ({ ...t, camera: await camera.status(t.id) }))));
+  r.get('/v1/tables/:id', async (req) => ({ ...(await game.tableView(req.params.id)), camera: await camera.status(req.params.id) }));
+  // The table's live picture from its host camera (refreshed about once a second).
+  r.get('/v1/tables/:id/camera.jpg', async (req) => sendJpeg(req.res, (await camera.frame(req.params.id)).jpeg));
   r.get('/v1/stream', async (req) => {
     const tableId = req.query.get('table');
     if (tableId) await game.table(tableId);
@@ -92,8 +102,32 @@ export async function createApp(opts: AppOptions = {}) {
   });
   r.get('/v1/me', async (req) => {
     const p = await player(req);
-    return { playerId: p.id, displayName: p.display_name, seatedAt: await game.seatOf(p.id), ...(await balanceOf(p)) };
+    return { playerId: p.id, displayName: p.display_name, direct: p.operator_id === 'op_direct', seatedAt: await game.seatOf(p.id), ...(await balanceOf(p)) };
   });
+  // Everything about the player's own account on one screen.
+  r.get('/v1/me/account', async (req) => {
+    const p = await player(req);
+    const op = await accounts.operator(p.operator_id);
+    const direct = p.operator_id === 'op_direct';
+    return {
+      profile: {
+        playerId: p.id, displayName: p.display_name, username: await accounts.login(p.id), memberSince: Number(p.created_at),
+        status: p.status, accountType: direct ? 'direct' : 'partner', via: direct ? 'GetFlop' : op.name,
+      },
+      ...(await balanceOf(p)),
+      stats: await accounts.bettingStats(p.id),
+      statement: op.wallet_mode === 'transfer' ? await accounts.statement(p, op.currency, Math.min(Math.max(Math.trunc(Number(req.query.get('limit') ?? 50)) || 50, 1), 200)) : null,
+      tournaments: await accounts.playerTournaments(p.id),
+      limits: direct ? await safer.view(p) : null,
+      seatedAt: await game.seatOf(p.id),
+    };
+  });
+  r.post('/v1/me/profile', async (req) => accounts.updateProfile(await player(req), req.body));
+  r.post('/v1/me/password', async (req) => accounts.changePassword(await player(req), req.body, bearer(req)));
+  // Safer play (direct players): limits and breaks. See safer.ts.
+  r.get('/v1/me/limits', async (req) => safer.view(await player(req)));
+  r.post('/v1/me/limits', async (req) => safer.setLimits(await player(req), req.body));
+  r.post('/v1/me/break', async (req) => safer.takeBreak(await player(req), req.body.days));
   r.get('/v1/me/bets', async (req) => game.playerBets((await player(req)).id));
   r.post('/v1/bets', async (req) => game.placeBet(await player(req), req.body));
   r.post('/v1/auth/register', (req) => accounts.registerPlayer(req.body));
@@ -143,12 +177,24 @@ export async function createApp(opts: AppOptions = {}) {
       q, q,
     );
   });
+  // ----- table host (the camera device at the table) -----
+  r.post('/v1/host/tables/:id/frame', async (req) => { await staff(req, 'dealer'); return camera.putFrame(req.params.id, req.body.jpeg); });
+  r.post('/v1/host/rounds/:id/scan', async (req) => camera.scan(req.params.id, req.body.jpeg, await actor(req, 'dealer')));
+  r.get('/v1/dealer/rounds/:id/camera', async (req) => { await staff(req, 'dealer'); return camera.latest(req.params.id); });
+  r.get('/v1/dealer/rounds/:id/readings', async (req) => { await staff(req, 'supervisor'); return camera.readings(req.params.id); });
+  r.get('/v1/dealer/readings/:id/picture', async (req) => { await staff(req, 'supervisor'); return sendJpeg(req.res, await camera.evidence(req.params.id)); });
   r.get('/v1/dealer/rounds/:id/risk', async (req) => { await staff(req, 'dealer'); return game.roundRisk(req.params.id); });
 
   // ----- admin -----
-  r.get('/v1/admin/tables', async (req) => { await staff(req, 'supervisor'); return game.listTables(true); });
+  r.get('/v1/admin/tables', async (req) => { await staff(req, 'supervisor'); return Promise.all((await game.listTables(true)).map(async (t) => ({ ...t, camera: await camera.status(t.id) }))); });
   r.post('/v1/admin/tables', async (req) => game.createTable(req.body, await actor(req, 'admin')));
-  r.patch('/v1/admin/tables/:id', async (req) => game.updateTable(req.params.id, req.body, await actor(req, 'admin')));
+  r.patch('/v1/admin/tables/:id', async (req) => {
+    const by = await actor(req, 'admin');
+    const { cameraMode, ...rest } = req.body ?? {};
+    if (cameraMode !== undefined) await camera.setMode(req.params.id, cameraMode, by);
+    const out = Object.keys(rest).length || cameraMode === undefined ? await game.updateTable(req.params.id, rest, by) : await game.table(req.params.id);
+    return { ...out, camera: await camera.status(req.params.id) };
+  });
   r.get('/v1/admin/pricing', async (req) => { await staff(req, 'supervisor'); return priceList(int(Number(req.query.get('marginBps') ?? 500), 'marginBps', 0, 3000)); });
   r.get('/v1/admin/tournaments', async (req) => { await staff(req, 'supervisor'); return tournaments.list(true); });
   r.get('/v1/admin/tournament-strategies', async (req) => { await staff(req, 'supervisor'); return [...STRATEGIES.values()].map((s) => ({ id: s.id, name: s.name, defaults: s.parseRules({}) })); });
@@ -159,12 +205,18 @@ export async function createApp(opts: AppOptions = {}) {
     const q = `%${req.query.get('q') ?? ''}%`;
     return db.all(
       `SELECT p.id, p.display_name AS "displayName", p.external_id AS "externalId", p.status, o.name AS operator, o.currency, l.username,
-              COALESCE(b.balance, 0) AS balance
+              COALESCE(b.balance, 0) AS balance, CASE WHEN pl.excluded_until > ? THEN pl.excluded_until END AS "onBreakUntil"
        FROM players p JOIN operators o ON o.id = p.operator_id LEFT JOIN player_logins l ON l.player_id = p.id
        LEFT JOIN balances b ON b.account = 'player:' || p.id AND b.currency = o.currency
+       LEFT JOIN player_limits pl ON pl.player_id = p.id
        WHERE p.display_name LIKE ? OR l.username LIKE ? OR p.external_id LIKE ? ORDER BY p.created_at DESC LIMIT 100`,
-      q, q, q,
+      now(), q, q, q,
     );
+  });
+  r.get('/v1/admin/players/:id/limits', async (req) => {
+    await staff(req, 'supervisor');
+    const p = (await db.get<PlayerRow>('SELECT * FROM players WHERE id = ?', req.params.id)) ?? fail(404, 'PLAYER_NOT_FOUND');
+    return safer.view(p!);
   });
   r.post('/v1/admin/players/:id/cashier', async (req) => accounts.cashier(req.params.id, req.body.amount, req.body.note, await actor(req, 'admin')));
   r.get('/v1/admin/operators', async (req) => { await staff(req, 'admin'); return accounts.listOperators(); });
@@ -302,7 +354,7 @@ export async function createApp(opts: AppOptions = {}) {
     await db.close();
   }
 
-  return { server, db, ledger, audit, events, wallet, game, accounts, billing, tournaments, startBackground, bootstrapAdmin, stop, tick: tickOnce };
+  return { server, db, ledger, audit, events, wallet, game, accounts, safer, camera, billing, tournaments, startBackground, bootstrapAdmin, stop, tick: tickOnce };
 }
 
 export type App = Awaited<ReturnType<typeof createApp>>;

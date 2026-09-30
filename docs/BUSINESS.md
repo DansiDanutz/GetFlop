@@ -40,7 +40,7 @@ This is software, not a licence. Real-money betting and paid-entry tournaments a
 
 - **Licence.** You need a gambling licence where you operate (B2C), and a supplier/B2B licence to provide the game to partners in most regulated markets. Talk to a gaming lawyer first; this decides which countries you can accept players from.
 - **KYC / AML / age checks** for direct players (identity verification provider, source of funds checks above thresholds).
-- **Responsible gambling:** deposit limits, loss limits, time-outs, self-exclusion. Partners handle this for their own players.
+- **Responsible gambling:** built for direct players (Play → Safer play): 24-hour and 7-day loss limits, a 7-day deposit limit at the cashier, time-outs (1–30 days) and self-exclusion (6 months to 5 years). Lower limits apply at once; higher ones after a 24-hour cooling-off; a break cannot be shortened. Every change is in the audit log. Partners handle this for their own players. Still to add before real money: a national self-exclusion register check and reality-check reminders, where the licence requires them.
 - **Payments** for direct players. The cashier today is manual, for the club desk. Connect a licensed payment provider.
 - **Game certification.** Regulators usually want the game rules, the odds and the settlement logic tested by an accredited lab. The exact-probability design and the tests (`test/markets.test.ts`) make that straightforward.
 - **Free-to-play first.** Freeroll tournaments with a prize pool paid by the house are the lowest-risk way to launch and build an audience while the licence is in progress. Check local promotion/sweepstakes rules.
@@ -49,7 +49,7 @@ This is software, not a licence. Real-money betting and paid-entry tournaments a
 
 1. **Pilot in our own club:** freeroll tournaments on one table, dual-confirm on, camera recording.
 2. **Video:** low-latency stream per table (WebRTC or LL-HLS) in the `streamUrl` slot.
-3. **Card recognition:** RFID shoe or camera recognition instead of manual flop entry (removes the human-error and collusion risk of item 4).
+3. **Card recognition:** built: a camera over each table and AI flop reading (docs/CAMERA.md), with dealer confirmation or fully automatic entry. Next: run it at our tables, measure accuracy per table, then consider an RFID shoe for certification where a regulator requires it.
 4. **Licence + payments + KYC** → real-money cash betting for direct players.
 5. **First partner** on the seamless wallet; monthly invoices from Admin → Commission.
 6. **More content:** more markets (exact card, flop total, turn/river), more tournament formats, partner-branded tables.

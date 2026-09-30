@@ -243,6 +243,7 @@ export class Tournaments {
       if (t.buy_in > 0) {
         if (op.wallet_mode !== 'transfer') fail(409, 'BUY_IN_UNAVAILABLE', 'Paid tournaments are not available through your provider yet');
         if (op.currency !== t.currency) fail(409, 'CURRENCY_MISMATCH', `This tournament is played in ${t.currency}`);
+        await this.game.safer.assertCanPlay(player, t.buy_in, t.currency);
         await this.ledger.transfer('tournament.buy_in', `${tournamentId}:${player.id}`, t.currency, `player:${player.id}`, `tournament:${tournamentId}`, t.buy_in);
       }
       await this.db.run('INSERT INTO tournament_entries (tournament_id, player_id, points, joined_at) VALUES (?, ?, ?, ?)', tournamentId, player.id, strategy.startingPoints(rules), this.now());
@@ -313,6 +314,7 @@ export class Tournaments {
     if (op?.status !== 'active') fail(403, 'OPERATOR_SUSPENDED');
     const fresh = await this.db.get<{ status: string }>('SELECT status FROM players WHERE id = ?', player.id);
     if (fresh?.status !== 'active') fail(403, 'PLAYER_BLOCKED');
+    await this.game.safer.assertNotOnBreak(player);
   }
 
   // A player who sits down at the table gets this hand's tournament bets back (points and bet count).
