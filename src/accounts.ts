@@ -128,7 +128,12 @@ export class Accounts {
     // without moving money again; reusing the id for anything else is refused.
     const ref = `${op.id}:${str(input.txId, 'txId', 100)}`;
     const signed = direction === 'deposit' ? amount : -amount;
-    const prior = this.ledger.findTx('operator.transfer', ref);
+    // Transfers recorded before txIds were unified used the kinds 'deposit' and 'withdraw' with
+    // the same ref; they are still the same transfer.
+    const prior = this.db.get<{ id: string }>(
+      "SELECT id FROM ledger_tx WHERE ref = ? AND kind IN ('operator.transfer', 'deposit', 'withdraw') ORDER BY created_at LIMIT 1",
+      ref,
+    );
     if (prior) {
       const entry = this.db.get<{ amount: number }>('SELECT amount FROM ledger_entries WHERE tx_id = ? AND account = ?', prior.id, `player:${player.id}`);
       if (entry?.amount !== signed)

@@ -175,3 +175,14 @@ test('table limits apply to each currency separately', async () => {
   await s.app.game.placeBet(u, { roundId: r.id, marketId: 'RAINBOW', stake: 7000 });
   assert.deepEqual(Object.keys(s.app.game.roundRisk(r.id)).sort(), ['EUR', 'USD']);
 });
+
+test('transfers recorded under the old deposit/withdraw kinds are still recognised on retry', () => {
+  const s = setup();
+  const p = s.player('legacy', 0);
+  // What the previous version wrote for a deposit of 1000 (t-old-1) and a withdrawal of 200 (t-old-2).
+  s.app.ledger.transfer('deposit', `${s.op.id}:t-old-1`, 'EUR', `operator:${s.op.id}`, `player:${p.id}`, 1000);
+  s.app.ledger.transfer('withdraw', `${s.op.id}:t-old-2`, 'EUR', `player:${p.id}`, `operator:${s.op.id}`, 200);
+  assert.equal(s.app.accounts.transfer(s.opRow, 'deposit', { playerId: 'legacy', amount: 1000, txId: 't-old-1' }).balance, 800);
+  assert.equal(s.app.accounts.transfer(s.opRow, 'withdraw', { playerId: 'legacy', amount: 200, txId: 't-old-2' }).balance, 800);
+  assert.throws(() => s.app.accounts.transfer(s.opRow, 'withdraw', { playerId: 'legacy', amount: 1000, txId: 't-old-1' }), { code: 'TX_ID_REUSED' });
+});
