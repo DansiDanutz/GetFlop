@@ -81,4 +81,5 @@ Put it behind HTTPS (any reverse proxy, e.g. Caddy or nginx). Live updates use S
 | `src/billing.ts` | GGR reports and commission invoices with carry-forward |
 | `src/audit.ts` | Hash-chained audit log |
 | `src/http.ts`, `src/app.ts` | HTTP toolkit and the API routes |
-| `public/` | Player, dealer and admin screens |
+| `public/` | Player, dealer, admin and TV screens |
+| `public/icon.svg`, `public/img/` | Brand images, drawn as SVG: app mark, logo, card back, landing art, share image; the PNG icons and `og.png` are rendered from them. `manifest.webmanifest` makes the app installable on phones |
