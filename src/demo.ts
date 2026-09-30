@@ -19,6 +19,13 @@ const links = ['alex', 'maria'].map((name, i) => {
   return `http://localhost:${port}/play.html#token=${accounts.createPlayerSession(player).token}&table=${table.id}`;
 });
 
+app.tournaments.create({
+  name: "Tonight's Flop Race", strategy: 'points_race', currency: 'EUR', buyIn: 0, guaranteed: 10_000,
+  rules: { startingPoints: 1000, maxBets: 100, paidPercent: 5 },
+}, 'system');
+const direct = accounts.registerPlayer({ username: 'demo', password: 'demo-pass', displayName: 'Demo Player' });
+accounts.cashier(direct.player.id, 20_000, 'demo credit', 'system');
+
 app.startBackground();
 app.server.listen(port, () => {
   console.log(`
@@ -26,6 +33,7 @@ GetFlop demo running on http://localhost:${port}
 
   Player "Alex"  (500.00 EUR): ${links[0]}
   Player "Maria" (500.00 EUR): ${links[1]}
+  Sign-up player: http://localhost:${port}/   demo / demo-pass (200.00 EUR)   or create your own account
   Dealer console: http://localhost:${port}/dealer.html   dealer / dealer-demo-pass
   Supervisor:                                           floor / floor-demo-pass (can void rounds)
   Admin:          http://localhost:${port}/admin.html    admin / admin-demo-pass

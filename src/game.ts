@@ -124,7 +124,8 @@ export class Game {
   // Everything a player screen needs for one table.
   tableView(tableId: string) {
     const t = this.table(tableId);
-    const round = this.currentRound(tableId);
+    // Between hands the last result stays on screen until the dealer opens the next round.
+    const round = this.currentRound(tableId) ?? this.db.get('SELECT * FROM rounds WHERE table_id = ? ORDER BY number DESC LIMIT 1', tableId);
     const history = this.db
       .all("SELECT number, flop, settled_at FROM rounds WHERE table_id = ? AND status = 'settled' ORDER BY number DESC LIMIT 20", tableId)
       .map((r) => ({ number: r.number, flop: JSON.parse(r.flop), at: r.settled_at }));
@@ -159,6 +160,7 @@ export class Game {
       openedAt: r.opened_at,
       closesAt: r.status === 'open' ? r.closes_at : r.closed_at,
       flop: r.flop ? JSON.parse(r.flop) : null,
+      winningMarkets: r.flop ? winningMarkets(JSON.parse(r.flop)) : [],
       awaitingConfirmation: !!r.pending_flop,
       betsByMarket: Object.fromEntries(counts.map((c) => [c.market_id, c.n])),
     };
@@ -413,6 +415,11 @@ function worstCaseAfter(e: Exposure, wins: Uint8Array | null, stake: number, pay
     if (v > worst) worst = v;
   }
   return worst - (e.stakes + stake);
+}
+
+function winningMarkets(cards: string[]) {
+  const idx = flopIndex(parseFlop(cards));
+  return [...MARKETS.values()].filter((m) => m.wins[idx] === 1).map((m) => m.id);
 }
 
 const sameFlop = (a: string, b: string) => JSON.stringify(JSON.parse(a).sort()) === JSON.stringify(JSON.parse(b).sort());

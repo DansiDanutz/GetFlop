@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>GetFlop · Play</title>
+  <link rel="icon" href="icon.svg">
+  <link rel="stylesheet" href="app.css">
+</head>
+<body>
+  <div class="bar">
+    <span class="brand">Get<b>Flop</b></span>
+    <span class="grow"></span>
+    <span id="who" class="muted small"></span>
+    <strong id="balance"></strong>
+    <button id="logout" class="small">Log out</button>
+  </div>
+  <div class="wrap">
+    <div class="tabs">
+      <button data-tab="tables" class="on">Live tables</button>
+      <button data-tab="tournaments">Tournaments</button>
+      <button data-tab="history">My bets</button>
+    </div>
+    <div id="view"></div>
+  </div>
+  <script type="module" src="play.js"></script>
+</body>
+</html>

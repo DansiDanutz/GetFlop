@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>GetFlop · Bet the flop, live</title>
+  <link rel="icon" href="icon.svg">
+  <link rel="stylesheet" href="app.css">
+</head>
+<body>
+  <div class="bar"><span class="brand">Get<b>Flop</b></span></div>
+  <div class="hero">
+    <h1>Bet the flop. Live.</h1>
+    <p class="muted">Real dealers, real cards, real tables. Pick what the flop brings before it hits the felt,<br>or race everyone in a tournament for the prize pool.</p>
+  </div>
+  <div class="wrap" style="max-width:420px">
+    <div class="card">
+      <div class="tabs"><button id="tab-login" class="on">Log in</button><button id="tab-register">Create account</button></div>
+      <form id="form">
+        <label>Username <input name="username" autocomplete="username" required minlength="3" maxlength="24"></label>
+        <label id="dn" class="hidden">Display name (shown on leaderboards) <input name="displayName" maxlength="40"></label>
+        <label>Password <input name="password" type="password" autocomplete="current-password" required minlength="8"></label>
+        <button class="primary big" id="submit">Log in</button>
+      </form>
+    </div>
+    <p class="muted small">18+ only. Play responsibly. Staff: <a href="dealer.html">dealer console</a> · <a href="admin.html">admin</a></p>
+  </div>
+  <script type="module" src="index.js"></script>
+</body>
+</html>
