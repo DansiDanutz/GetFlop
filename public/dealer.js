@@ -107,7 +107,8 @@ function render() {
 
   $('#view').replaceChildren(h('div', {},
     h('div', { class: 'row', style: 'margin-bottom:12px' }, h('button', { onclick: pickTable }, '← Tables'), h('h1', { style: 'margin:0' }, table.name),
-      table.dualConfirm ? h('span', { class: 'pill' }, 'dual confirm') : null),
+      table.dualConfirm ? h('span', { class: 'pill' }, 'dual confirm') : null,
+      h('a', { class: 'btn small right', href: `tv.html?table=${encodeURIComponent(table.id)}`, target: '_blank', title: 'Open on the TV in the room' }, 'TV screen')),
     h('div', { class: 'card row' },
       h('div', {}, h('div', { class: 'muted small' }, round ? `Hand #${round.number}` : ''), h('h2', { style: 'margin:0' }, status)),
       h('div', { class: 'right countdown', id: 'cd' }),

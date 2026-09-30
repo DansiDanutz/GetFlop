@@ -145,7 +145,7 @@ export class Game {
     // Between hands the last result stays on screen until the dealer opens the next round.
     const round = (await this.currentRound(tableId)) ?? (await this.db.get('SELECT * FROM rounds WHERE table_id = ? ORDER BY number DESC LIMIT 1', tableId));
     const history = (await this.db.all("SELECT number, flop, settled_at FROM rounds WHERE table_id = ? AND status = 'settled' ORDER BY number DESC LIMIT 20", tableId))
-      .map((r) => ({ number: r.number, flop: JSON.parse(r.flop), at: r.settled_at }));
+      .map((r) => { const flop = JSON.parse(r.flop); return { number: r.number, flop, at: r.settled_at, winningMarkets: winningMarkets(flop) }; });
     return {
       table: publicTable(t),
       markets: priceList(t.margin_bps).map(({ houseEdge: _h, ...m }) => m),

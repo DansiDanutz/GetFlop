@@ -61,6 +61,7 @@ Put it behind HTTPS (any reverse proxy, e.g. Caddy or nginx). Live updates use S
 | Sign up / log in | `/` | players |
 | Play | `/play.html` | players (or partner launch links) |
 | Dealer console | `/dealer.html` | dealers, supervisors |
+| Table TV | `/tv.html?table=…` | the screen in the room: countdown, odds, bets per market, the flop, winners, last flops, tournament top 5 (link in the dealer console) |
 | Admin | `/admin.html` | admins: tables, partners, players & cashier, tournaments, commission, audit |
 
 ## Code map

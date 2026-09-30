@@ -28,6 +28,8 @@ test('a round from open to settled pays winners and books the result', async () 
   await err(s.app.game.placeBet(alex, { roundId: round.id, marketId: 'RAINBOW', stake: 1000 }), 'BETTING_CLOSED');
   const res = await s.app.game.submitFlop(round.id, ['Ah', '7c', '2d'], 'staff:dealer');
   assert.equal(res.settled, true);
+  const tv = await s.app.game.tableView(s.table.id);
+  assert.ok(tv.history[0].winningMarkets.includes('RAINBOW')); // the TV screen's hit counts use this
 
   assert.equal(await s.balance(alex.id), 99_000 + 2380);
   assert.equal(await s.balance(maria.id), 98_000);
