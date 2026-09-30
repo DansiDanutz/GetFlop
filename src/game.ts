@@ -133,8 +133,17 @@ export class Game {
     const rows = await this.db.all(`SELECT * FROM tables ${includeInactive ? '' : "WHERE status = 'active'"} ORDER BY name`);
     const out = [];
     for (const t of rows) {
-      const round = await this.currentRound(t.id);
-      out.push({ ...publicTable(t), round: round ? await this.publicRound(round) : null });
+      // Like tableView: between hands the last result stays until the dealer opens the next one.
+      const round = (await this.currentRound(t.id)) ?? (await this.db.get('SELECT * FROM rounds WHERE table_id = ? ORDER BY number DESC LIMIT 1', t.id));
+      // The lobby shows every table live: its odds, the hand in play and the last flops.
+      const recent = (await this.db.all("SELECT number, flop FROM rounds WHERE table_id = ? AND status = 'settled' ORDER BY number DESC LIMIT 5", t.id))
+        .map((r) => ({ number: r.number, flop: JSON.parse(r.flop) }));
+      out.push({
+        ...publicTable(t),
+        markets: priceList(t.margin_bps).map((m) => ({ id: m.id, name: m.name, oddsX100: m.oddsX100 })),
+        round: round ? await this.publicRound(round) : null,
+        recent,
+      });
     }
     return out;
   }

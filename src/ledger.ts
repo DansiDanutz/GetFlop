@@ -34,7 +34,7 @@ export class Ledger {
     if (sum !== 0) throw new Error(`ledger tx ${kind} does not balance (${sum})`);
     if (entries.some((e) => !Number.isSafeInteger(e.amount))) throw new Error('ledger amounts must be integers');
     return this.db.tx(async () => {
-      const id = newId('tx');
+      const id = this.nextTxId();
       await this.db.run('INSERT INTO ledger_tx (id, kind, ref, created_at) VALUES (?, ?, ?, ?)', id, kind, ref, this.now());
       for (const e of entries) {
         if (e.amount === 0) continue;
@@ -49,6 +49,15 @@ export class Ledger {
       }
       return id;
     });
+  }
+
+  // Transaction ids sort in the order they were written (time, then a counter), so a player's
+  // statement lists movements made in the same millisecond in the order they happened.
+  private seq = 0;
+  private nextTxId() {
+    const t = this.now().toString(36).padStart(9, '0');
+    const n = (this.seq++ % 46_656).toString(36).padStart(3, '0');
+    return `tx_${t}${n}${newId('').slice(1, 9)}`;
   }
 
   transfer(kind: string, ref: string | null, currency: string, from: string, to: string, amount: number): Promise<string> {

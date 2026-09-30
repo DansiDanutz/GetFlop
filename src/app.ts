@@ -96,6 +96,26 @@ export async function createApp(opts: AppOptions = {}) {
     const p = await player(req);
     return { playerId: p.id, displayName: p.display_name, direct: p.operator_id === 'op_direct', seatedAt: await game.seatOf(p.id), ...(await balanceOf(p)) };
   });
+  // Everything about the player's own account on one screen.
+  r.get('/v1/me/account', async (req) => {
+    const p = await player(req);
+    const op = await accounts.operator(p.operator_id);
+    const direct = p.operator_id === 'op_direct';
+    return {
+      profile: {
+        playerId: p.id, displayName: p.display_name, username: await accounts.login(p.id), memberSince: Number(p.created_at),
+        status: p.status, accountType: direct ? 'direct' : 'partner', via: direct ? 'GetFlop' : op.name,
+      },
+      ...(await balanceOf(p)),
+      stats: await accounts.bettingStats(p.id),
+      statement: op.wallet_mode === 'transfer' ? await accounts.statement(p, op.currency, Math.min(Number(req.query.get('limit') ?? 50) || 50, 200)) : null,
+      tournaments: await accounts.playerTournaments(p.id),
+      limits: direct ? await safer.view(p) : null,
+      seatedAt: await game.seatOf(p.id),
+    };
+  });
+  r.post('/v1/me/profile', async (req) => accounts.updateProfile(await player(req), req.body));
+  r.post('/v1/me/password', async (req) => accounts.changePassword(await player(req), req.body, bearer(req)));
   // Safer play (direct players): limits and breaks. See safer.ts.
   r.get('/v1/me/limits', async (req) => safer.view(await player(req)));
   r.post('/v1/me/limits', async (req) => safer.setLimits(await player(req), req.body));

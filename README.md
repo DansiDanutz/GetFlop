@@ -22,7 +22,7 @@ No frameworks and no runtime dependencies. Everything runs on what ships with No
 
 ```bash
 npm run demo     # in-memory demo with staff, a table, players and a tournament; prints the links
-npm test         # 35 tests: pricing, ledger, rounds, risk limits, seating, wallets, API, commission, tournaments, safer play
+npm test         # 38 tests: pricing, ledger, rounds, risk limits, seating, wallets, API, commission, tournaments, safer play, account, lobby
 TEST_DATABASE_URL=postgres://... npm test   # the same tests against PostgreSQL (the database is wiped first)
 npm run odds     # the price list: exact probabilities and odds at a given margin (npm run odds -- 300)
 ```
@@ -59,7 +59,7 @@ Put it behind HTTPS (any reverse proxy, e.g. Caddy or nginx). Live updates use S
 | Screen | URL | Who |
 |---|---|---|
 | Sign up / log in | `/` | players |
-| Play | `/play.html` | players (or partner launch links) |
+| Play | `/play.html` | players (or partner launch links): the lobby with every table live (bet from it), each table, tournaments, bet history, and My account (balance, statement, stats, limits, name and password) |
 | Dealer console | `/dealer.html` | dealers, supervisors |
 | Table TV | `/tv.html?table=…` | the screen in the room: countdown, odds, bets per market, the flop, winners, last flops, tournament top 5 (link in the dealer console) |
 | Admin | `/admin.html` | admins: tables, partners, players & cashier, tournaments, commission, audit |
