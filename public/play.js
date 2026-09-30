@@ -90,17 +90,21 @@ async function loadLobby() {
 }
 
 // ---------- table ----------
-// Responses can arrive after the player has moved to another table (or left the table view);
-// those are dropped so they never overwrite the screen or the video of the current table.
+// Refreshes can overlap (live updates, the backup timer, the player switching table or wallet).
+// Only the most recently started one may update the screen: an older response must never put
+// back an old table, video or betting wallet (cash vs tournament points).
+let tableLoadSeq = 0;
 async function loadTable() {
+  const seq = ++tableLoadSeq;
   const tableId = state.tableId;
+  const current = () => seq === tableLoadSeq && state.tableId === tableId;
   const [view, tours] = await Promise.all([call('GET', `/v1/tables/${tableId}`), myRunningTournaments()]);
-  if (state.tableId !== tableId) return;
+  if (!current()) return;
   const playFor = state.playFor !== 'cash' && !tours.find((t) => t.id === state.playFor) ? 'cash' : state.playFor;
   const myBets = playFor === 'cash'
     ? (await call('GET', '/v1/me/bets')).filter((b) => b.roundId === view.round?.id)
     : (tours.find((t) => t.id === playFor)?.me?.bets ?? []).filter((b) => b.roundId === view.round?.id);
-  if (state.tableId !== tableId) return;
+  if (!current()) return;
   syncClock(view.serverTime);
   Object.assign(state, { data: view, tours, playFor, myBets });
   renderTable();
