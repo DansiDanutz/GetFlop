@@ -110,6 +110,13 @@ CREATE TABLE IF NOT EXISTS ledger_tx (
   UNIQUE (kind, ref)
 );
 
+-- Order in which ledger transactions were written (a separate table so existing databases get it
+-- without a migration; transactions written before it existed have no row and sort by time).
+CREATE TABLE IF NOT EXISTS ledger_order (
+  seq INTEGER PRIMARY KEY AUTOINCREMENT,
+  tx_id TEXT NOT NULL UNIQUE REFERENCES ledger_tx(id)
+);
+
 CREATE TABLE IF NOT EXISTS ledger_entries (
   tx_id TEXT NOT NULL REFERENCES ledger_tx(id),
   account TEXT NOT NULL,

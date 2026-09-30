@@ -160,7 +160,7 @@ function renderLobby() {
     h('div', { class: 'card lobby-bar' },
       h('div', { class: 'row' },
         h('span', { class: 'muted small' }, 'Playing for'),
-        h('select', { style: 'width:auto', onchange: (e) => { state.playFor = e.target.value; loadLobby(); } },
+        h('select', { style: 'width:auto', onchange: (e) => { state.playFor = e.target.value; renderLobby(); loadLobby(); } },
           h('option', { value: 'cash', selected: state.playFor === 'cash' }, `Cash · ${state.me.balance === null ? '' : money(state.me.balance, state.me.currency)}`),
           lobby.tours.map((t) => h('option', { value: t.id, selected: state.playFor === t.id }, `${t.name} · ${pts(t.me.points)} pts`)),
         ),
@@ -203,7 +203,7 @@ function tile(t, stake) {
       const n = r?.betsByMarket?.[id];
       return h('button', {
         class: `mkt${wins.has(id) ? ' win' : ''}${mine.has(id) ? ' mine' : ''}`, disabled: !live || seated || !inRange,
-        onclick: () => lobbyBet(t, m, stake),
+        onclick: () => lobbyBet(t, m),
       }, n ? h('div', { class: 'count' }, `${n} bet${n > 1 ? 's' : ''}`) : '', h('div', { class: 'odds' }, odds(m.oddsX100)), h('div', { class: 'name' }, m.name));
     })),
     h('div', { class: 'row' },
@@ -213,7 +213,10 @@ function tile(t, stake) {
   );
 }
 
-async function lobbyBet(t, m, stake) {
+// The stake is the selected chip of the wallet chosen right now, never one shown before a switch.
+async function lobbyBet(t, m) {
+  const chips = lobbyChips();
+  const stake = chips[Math.min(lobby.chip, chips.length - 1)];
   const clientRef = crypto.randomUUID();
   try {
     if (state.playFor === 'cash') await call('POST', '/v1/bets', { roundId: t.round.id, marketId: m.id, stake, clientRef });
@@ -307,7 +310,7 @@ function renderTable() {
         h('div', { class: 'card' },
           h('div', { class: 'row', style: 'margin-bottom:12px' },
             h('span', { class: 'muted small' }, 'Playing for'),
-            h('select', { style: 'width:auto', onchange: (e) => { state.playFor = e.target.value; loadTable(); } },
+            h('select', { style: 'width:auto', onchange: (e) => { state.playFor = e.target.value; renderTable(); loadTable(); } },
               h('option', { value: 'cash', selected: state.playFor === 'cash' }, `Cash · ${state.me.balance === null ? '' : money(state.me.balance, state.me.currency)}`),
               state.tours.map((t) => h('option', { value: t.id, selected: state.playFor === t.id }, `${t.name} · ${pts(t.me.points)} pts · ${t.rules.maxBets - t.me.betsUsed} bets left`)),
             ),
@@ -315,7 +318,7 @@ function renderTable() {
           h('div', { class: 'chips', style: 'margin-bottom:14px' }, chips.map((v, i) => h('button', { class: `chip c${i % 5}${i === state.chip ? ' sel' : ''}`, title: fmtStake(v), onclick: () => { state.chip = i; renderTable(); } }, state.playFor === 'cash' ? short(v / 100) : short(v)))),
           h('div', { class: 'markets' }, markets.map((m) => h('button', {
             class: `mkt${wins.has(m.id) ? ' win' : ''}${mine.has(m.id) ? ' mine' : ''}`, disabled: !open,
-            onclick: () => bet(m, chips[state.chip]),
+            onclick: () => bet(m),
           }, h('div', { class: 'count' }, round?.betsByMarket?.[m.id] ? `${round.betsByMarket[m.id]} bet${round.betsByMarket[m.id] > 1 ? 's' : ''}` : ''), h('div', { class: 'odds' }, odds(m.oddsX100)), h('div', { class: 'name' }, m.name)))),
           h('p', { class: 'muted small' }, `Tap a chip, then a market. Odds include your stake. ${state.playFor === 'cash' ? `Limits ${money(table.minStake)}–${money(table.maxStake)} per bet.` : tour ? `Tournament: ${tour.rules.minStake}–${tour.rules.maxStake} pts per bet.` : ''}`),
         ),
@@ -336,7 +339,10 @@ const short = (n) => (n >= 1000 ? `${n / 1000}k` : String(n));
 let marketNames = {}; // id -> name, loaded once for screens without a table
 const marketName = (id) => state.data?.markets.find((m) => m.id === id)?.name ?? marketNames[id] ?? id;
 
-async function bet(market, stake) {
+// Like the lobby: the stake comes from the wallet selected at the moment of the tap.
+async function bet(market) {
+  const chips = chipValues();
+  const stake = chips[Math.min(state.chip, chips.length - 1)];
   const round = state.data.round;
   const clientRef = crypto.randomUUID();
   try {

@@ -220,11 +220,17 @@ export class Accounts {
 
   // Money in and out of the player's balance, newest first, each line with the balance after it.
   async statement(player: PlayerRow, currency: string, limit = 50) {
-    const rows = await this.db.all<{ id: string; kind: string; ref: string | null; at: number; amount: number }>(
-      `SELECT t.id, t.kind, t.ref, t.created_at AS at, e.amount FROM ledger_entries e JOIN ledger_tx t ON t.id = e.tx_id
-       WHERE e.account = ? AND e.currency = ? ORDER BY t.created_at DESC, t.id DESC LIMIT ?`,
-      `player:${player.id}`, currency, limit,
-    );
+    // Movements and the current balance in one transaction, so the balances shown line up exactly.
+    const { rows, current } = await this.db.tx(async () => ({
+      rows: await this.db.all<{ id: string; kind: string; ref: string | null; at: number; amount: number }>(
+        `SELECT t.id, t.kind, t.ref, t.created_at AS at, e.amount FROM ledger_entries e JOIN ledger_tx t ON t.id = e.tx_id
+         LEFT JOIN ledger_order o ON o.tx_id = t.id
+         WHERE e.account = ? AND e.currency = ?
+         ORDER BY CASE WHEN o.seq IS NULL THEN 0 ELSE 1 END DESC, o.seq DESC, t.created_at DESC, t.id DESC LIMIT ?`,
+        `player:${player.id}`, currency, limit,
+      ),
+      current: await this.ledger.balance(`player:${player.id}`, currency),
+    }));
     const betIds = rows.filter((r) => ['bet', 'settle', 'refund'].includes(r.kind) && r.ref).map((r) => r.ref!);
     const bets = new Map<string, Row>();
     for (const id of new Set(betIds)) {
@@ -238,7 +244,7 @@ export class Accounts {
       const t = await this.db.get<{ name: string }>('SELECT name FROM tournaments WHERE id = ?', id);
       if (t) tours.set(id, t.name);
     }
-    let balance = await this.ledger.balance(`player:${player.id}`, currency);
+    let balance = current;
     return rows.map((r) => {
       const amount = Number(r.amount);
       const line = { at: Number(r.at), kind: r.kind, amount, balanceAfter: balance, text: describe(r.kind, amount, r.ref, bets, tours) };

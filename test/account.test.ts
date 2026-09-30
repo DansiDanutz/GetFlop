@@ -79,3 +79,16 @@ test('the lobby lists every active table live: odds, the hand in play and the la
   // Odds follow each table's own margin.
   assert.ok(lobby[1].markets.find((m: any) => m.id === 'RAINBOW').oddsX100 > 238);
 });
+
+test('the statement keeps the order movements were written in, even from two app servers in the same millisecond', async () => {
+  const { Ledger } = await import('../src/ledger.ts');
+  const s = await setup();
+  const reg = await s.app.accounts.registerPlayer({ username: 'twoservers', password: 'long-password' });
+  const p = (await s.app.db.get('SELECT * FROM players WHERE id = ?', reg.player.id)) as any;
+  const serverA = s.app.ledger;
+  const serverB = new Ledger(s.app.db, () => s.clock.t); // a second server with its own counters
+  for (let i = 0; i < 3; i++) await serverA.transfer('cashier.deposit', null, 'EUR', 'house:cashier', `player:${p.id}`, 1000);
+  await serverB.transfer('cashier.withdraw', null, 'EUR', `player:${p.id}`, 'house:cashier', 2500);
+  const lines = await s.app.accounts.statement(p, 'EUR');
+  assert.deepEqual(lines.map((l) => [l.amount, l.balanceAfter]), [[-2500, 500], [1000, 3000], [1000, 2000], [1000, 1000]]);
+});
