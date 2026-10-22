@@ -5,6 +5,7 @@ import { useToast } from '../../components/Toast';
 import { api } from '../../lib/api';
 import { getLanguage, useT } from '../../i18n/i18n';
 import type { User } from '../../state/session';
+import { afterSignInPath } from './afterSignIn';
 import { AuthShell } from './AuthShell';
 
 interface Form {
@@ -58,7 +59,7 @@ export function Register() {
       const { user } = await api.post<{ user: User }>('/auth/register', { registrationId, code });
       qc.setQueryData(['me'], user);
       toast.show(t('register_welcome', { name: user.displayName }), 'success');
-      navigate('/clubs', { replace: true });
+      navigate(afterSignInPath(user), { replace: true });
     } catch (err) {
       toast.error(err);
     } finally {

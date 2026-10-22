@@ -58,6 +58,8 @@ export function TopBar({ status, onHelp, menu, subtitle }: TopBarProps) {
           {menu}
           <button type="button" className="btn ghost block" onClick={() => go('/clubs')}>{t('menu_my_clubs')}</button>
           <button type="button" className="btn ghost block" onClick={() => go('/account')}>{t('menu_account')}</button>
+          {context?.surfaces.includes('player') && <button type="button" className="btn ghost block" onClick={() => go('/me/games')}>{t('me_games_title')}</button>}
+          <button type="button" className="btn ghost block" onClick={() => go('/help')}>{t('me_help_title')}</button>
           {user?.role === 'admin' && <button type="button" className="btn ghost block" onClick={() => go('/admin')}>{t('surface_admin')}</button>}
           <div className="row-between"><span className="muted">{t('language')}</span><LanguageSwitch /></div>
           <button type="button" className="btn ghost block" onClick={() => { setOpen(false); void logout().then(() => navigate('/login')); }}>{t('logout')}</button>

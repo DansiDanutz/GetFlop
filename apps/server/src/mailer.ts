@@ -1,9 +1,16 @@
 import type { Logger } from './http/errors.js';
 
+export interface MailAttachment {
+  readonly filename: string;
+  readonly contentType: string;
+  readonly content: Buffer;
+}
+
 export interface Mail {
   readonly to: string;
   readonly subject: string;
   readonly text: string;
+  readonly attachments?: readonly MailAttachment[];
 }
 
 export interface Mailer {

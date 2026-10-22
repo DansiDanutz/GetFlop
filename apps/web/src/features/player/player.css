@@ -1,0 +1,79 @@
+/* Player feature (#/player). Reuses styles/components.css; only table-specific pieces live here. */
+
+/* ── Lobby ── */
+.pl-table-card { display: grid; grid-template-columns: 112px 1fr; gap: 14px; text-align: left; align-items: stretch; }
+.pl-felt { position: relative; border-radius: var(--radius-sm); overflow: hidden; min-height: 112px; display: grid; place-items: center;
+  background: radial-gradient(90% 70% at 50% 40%, var(--felt-2), var(--felt)); border: 2px solid rgba(217, 164, 65, 0.45); }
+.pl-felt img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.pl-felt-game { padding: 8px; text-align: center; font: 700 12px/1.2 var(--font-display); color: var(--gold-2); letter-spacing: 0.04em; }
+.pl-featured { position: absolute; top: 6px; left: 6px; padding: 4px 8px; font-size: 10px; }
+
+/* ── Stage ── */
+.pl-stage { position: relative; }
+.pl-tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.pl-tiles .tile { min-height: 76px; padding: 10px 12px; }
+.pl-tiles .tile .label { font-size: 12px; }
+.pl-tiles .tile .value { font-size: 22px; }
+.pl-phase { display: grid; justify-items: center; gap: 4px; text-align: center; }
+.pl-reveal .pcard { animation: pl-flip 0.5s cubic-bezier(0.16, 1, 0.3, 1) both; }
+.pl-reveal .pcard:nth-child(2) { animation-delay: 0.25s; }
+.pl-reveal .pcard:nth-child(3) { animation-delay: 0.5s; }
+@keyframes pl-flip { from { transform: perspective(600px) rotateY(90deg) scale(0.9); opacity: 0; } to { transform: none; opacity: 1; } }
+.pl-nomore { position: absolute; inset: 30% 0 auto; margin: 0 auto; width: fit-content; padding: 14px 22px; border-radius: var(--radius);
+  background: var(--red); color: #fff; font: 800 22px/1 var(--font-display); letter-spacing: 0.08em; box-shadow: var(--shadow); animation: rise 0.2s ease; }
+
+/* ── Recent hands ── */
+.pl-recent .right { text-align: right; }
+
+/* ── Picker ── */
+.pl-mmax { font-size: 12px; }
+
+/* ── Live coupons ── */
+.pl-strip { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(240px, 82%); gap: 10px; overflow-x: auto; scroll-snap-type: x mandatory; padding-bottom: 4px; }
+.pl-strip > * { scroll-snap-align: start; }
+.pl-coupon { background: var(--cream); color: var(--ink); border-color: var(--cream-2); }
+.pl-coupon .faint, .pl-coupon .muted { color: #5d584e; }
+.pl-coupon .btn.link { color: #8a5d12; justify-self: start; }
+.pl-picks { margin: 0; padding-left: 18px; display: grid; gap: 2px; font-weight: 600; }
+
+/* ── Slip ── */
+.pl-amount-sm { width: 88px; min-height: 40px; text-align: center; padding: 8px; }
+.pl-rounds { font: 800 28px/1 var(--font-display); }
+.pl-total { font: 800 26px/1 var(--font-display); color: var(--gold-2); }
+.pl-totals { background: var(--surface-2); }
+
+/* ── Draws ── */
+.pl-draw { width: 100%; background: none; border: 0; color: inherit; cursor: pointer; align-items: center; }
+
+/* ── Win screen ── */
+.pl-win { align-items: center; z-index: 80; background: radial-gradient(80% 60% at 50% 40%, rgba(217, 164, 65, 0.28), rgba(0, 0, 0, 0.82)); }
+.pl-win-card { width: min(92vw, 420px); padding: 24px 20px; border-radius: var(--radius-lg); background: var(--surface); border: 1px solid var(--gold); box-shadow: 0 0 0 4px var(--gold-soft), var(--shadow); animation: pl-pop 0.35s cubic-bezier(0.16, 1, 0.3, 1); }
+.pl-win-amount { font-size: 44px; color: var(--gold-2); }
+.pl-win-market { min-height: 0; padding: 8px 12px; }
+@keyframes pl-pop { from { transform: scale(0.85); opacity: 0; } }
+
+/* ── Heat board ── */
+.pl-heat-headline { font: 700 18px/1.35 var(--font-display); }
+.pl-heat { display: grid; gap: 10px; }
+.pl-heat.dim { opacity: 0.55; }
+.pl-heat-row { display: grid; grid-template-columns: 74px 1fr 64px; gap: 10px; align-items: center; }
+.pl-heat-label { font-weight: 700; font-size: 14px; }
+.pl-heat-num { text-align: right; font-weight: 700; }
+.pl-heat-track { position: relative; height: 16px; border-radius: 8px; background: var(--surface-3); overflow: hidden; }
+.pl-heat-fill { position: absolute; inset: 0 auto 0 0; border-radius: 8px; background: var(--gold); }
+.pl-heat-band { position: absolute; top: 1px; bottom: 1px; border: 2px dashed rgba(243, 239, 230, 0.55); border-radius: 6px; z-index: 1; }
+.pl-heat-exp { position: absolute; top: -2px; bottom: -2px; width: 2px; background: var(--cream); z-index: 2; }
+.pl-heat-row.hot .pl-heat-fill { background: var(--red); }
+.pl-heat-row.cold .pl-heat-fill { background: #4a90d9; }
+.pl-hot { color: var(--red); }
+.pl-cold { color: #7fb4ec; }
+.pl-beads { display: flex; flex-wrap: wrap; gap: 3px; }
+.pl-beads span { width: 7px; height: 7px; border-radius: 50%; background: var(--surface-3); }
+.pl-beads span.on { background: var(--gold-2); }
+.pl-help summary { cursor: pointer; font-weight: 700; }
+.pl-help p { margin-top: 8px; }
+
+/* ── Rules ── */
+.pl-rule { align-items: flex-start; }
+.pl-rule-mult { font: 800 22px/1 var(--font-display); color: var(--gold-2); }
+.pl-coupon-rules { margin: 0; padding-left: 20px; }

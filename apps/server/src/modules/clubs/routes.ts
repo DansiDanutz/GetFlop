@@ -7,6 +7,7 @@ import { AppError } from '../../http/errors.js';
 import { handle } from '../../http/respond.js';
 import { currentUser } from '../auth/session.js';
 import { CAPABILITY_RANK, can, loadClubAccess, requireClub, type Capability } from './access.js';
+import { clubSetup as setupSummary } from '../members/setup.js';
 import {
   activeMemberCount, createClub, findByPublicId, myClubs, pendingJoinRequests, publicClubCard, requestJoin, reviewJoin, surfacesFor,
 } from './service.js';
@@ -51,6 +52,8 @@ export function clubsRouter(ctx: AppContext): Router {
       playMode: access.membership?.playMode ?? 'watch',
       surfaces: surfacesFor(access.roles, access.isAdmin),
       capabilities,
+      // First-steps summary for staff (members module), drives the Club tab dot.
+      setup: can(access, 'members.review') ? await setupSummary(ctx.db, access.club) : null,
     };
   }));
 

@@ -1,5 +1,5 @@
 import type { TableLimitsJson } from '../../db/schema/index.js';
-import { and, desc, eq, inArray, isNull } from 'drizzle-orm';
+import { and, desc, eq, inArray } from 'drizzle-orm';
 import type { Router } from 'express';
 import { z } from 'zod';
 import type { AppContext } from '../../context.js';
@@ -10,15 +10,17 @@ import { rooms } from '../../realtime/events.js';
 import { currentUser } from '../auth/session.js';
 import { can, requireClub } from '../clubs/access.js';
 import { couponDraws, placeCoupon, playerCoupons } from './coupons.js';
-import { heldTable, seatDealer, sit, standUp } from './dealer.js';
+import { seatDealer, standUp } from './dealer.js';
 import { fundsFor } from './funds.js';
-import { cancelHand, enterFlop, noMoreBets, publicHand, startHand } from './hands.js';
+import { publicHand } from './hands.js';
 import { catalogue, marketList, offeredAt } from './markets.js';
 import {
-  closePreview, closeTable, clubTablesList, createTable, emitTableChanged, getTable, liveHand, openTable,
+  closeTable, clubTablesList, createTable, emitTableChanged, getTable, liveHand, openTable,
   setTableLimits, setTableMarkets, updateTable, type TableRow,
 } from './tables.js';
 import { unitForTable } from './coupons.js';
+import { applyCreateExtras, prepareOpen } from '../inspector/openFlow.js';
+import { detailedClosePreview } from '../inspector/tablesAdmin.js';
 
 const tableInput = z.object({
   name: z.string().optional(),
@@ -36,7 +38,7 @@ const limitsInput = z.object({
   marketMaxCents: z.record(z.string(), z.number().int()).optional(),
 });
 
-async function tableView(ctx: AppContext, table: TableRow) {
+export async function tableView(ctx: AppContext, table: TableRow) {
   const cat = await catalogue(ctx.db);
   const hand = await liveHand(ctx.db, table.id);
   const [last] = await ctx.db.select().from(hands)
@@ -74,7 +76,8 @@ export function registerGame(api: Router, ctx: AppContext): void {
   api.post('/inspector/table', handle(async (req) => {
     const body = tableInput.extend({ name: z.string() }).parse(req.body);
     const access = await requireClub(ctx.db, req, currentUser(req), 'floor');
-    return { table: await tableView(ctx, await createTable(ctx, access, body)) };
+    const created = await createTable(ctx, access, body);
+    return { table: await tableView(ctx, await applyCreateExtras(ctx, access, created, req.body)) };
   }));
 
   api.put('/inspector/table/:id', handle(async (req) => {
@@ -83,17 +86,19 @@ export function registerGame(api: Router, ctx: AppContext): void {
   }));
 
   api.put('/inspector/table/:id/open', handle(async (req) => {
-    const { dealerId } = z.object({ dealerId: z.string().nullable().optional() }).parse(req.body ?? {});
-    const access = await requireClub(ctx.db, req, currentUser(req), 'floor');
+    const { dealerId, leaveHeld } = z.object({ dealerId: z.string().nullable().optional(), leaveHeld: z.boolean().optional() }).parse(req.body ?? {});
+    let access = await requireClub(ctx.db, req, currentUser(req), 'floor');
+    const prep = await prepareOpen(ctx, access, String(req.params.id), dealerId, leaveHeld ?? false);
+    if (prep.grantedSelfDealer) access = await requireClub(ctx.db, req, currentUser(req), 'floor');
     let table = await openTable(ctx, access, String(req.params.id));
-    if (dealerId) table = await seatDealer(ctx, access.club.id, table.id, dealerId);
+    if (dealerId) table = await seatDealer(ctx, access.club.id, table.id, dealerId, { staff: access });
     emitTableChanged(ctx, table);
-    return { table: await tableView(ctx, table) };
+    return { table: await tableView(ctx, table), left: prep.left };
   }));
 
   api.get('/inspector/table/:id/close-preview', handle(async (req) => {
     const access = await requireClub(ctx.db, req, currentUser(req), 'floor');
-    return closePreview(ctx, access, String(req.params.id));
+    return detailedClosePreview(ctx, access, String(req.params.id));
   }));
 
   api.put('/inspector/table/:id/close', handle(async (req) => {
@@ -121,9 +126,8 @@ export function registerGame(api: Router, ctx: AppContext): void {
     const [m] = await ctx.db.select({ roles: memberships.roles }).from(memberships)
       .where(and(eq(memberships.clubId, access.club.id), eq(memberships.userId, dealerId), eq(memberships.status, 'active')));
     if (!m?.roles.includes('dealer')) throw new AppError('dealer.not_found', 404);
-    const held = await heldTable(ctx.db, dealerId);
-    if (held && held.table.id !== req.params.id) throw new AppError('dealer.busy_elsewhere', 409, { table: held.table.name });
-    const table = await seatDealer(ctx, access.club.id, String(req.params.id), dealerId);
+    // A dealer seated elsewhere: dealer.busy_elsewhere, and the dealer gets a dealer.wanted_elsewhere notice.
+    const table = await seatDealer(ctx, access.club.id, String(req.params.id), dealerId, { staff: access });
     ctx.events.emit(rooms.user(dealerId), 'dealer:seat', { status: 'assigned', tableId: table.id, tableName: table.name });
     emitTableChanged(ctx, table);
     return { table: await tableView(ctx, table) };
@@ -136,65 +140,7 @@ export function registerGame(api: Router, ctx: AppContext): void {
     return { table: await tableView(ctx, await standUp(ctx, access.club.id, table.id, table.dealerId, 'floor')) };
   }));
 
-  // ── Dealer ──
-  api.get('/dealer/tables', handle(async (req) => {
-    const user = currentUser(req);
-    const held = await heldTable(ctx.db, user.id);
-    return { tables: held ? [{ ...(await tableView(ctx, held.table)), clubName: held.clubName }] : [] };
-  }));
-
-  api.get('/dealer/available-tables', handle(async (req) => {
-    const access = await requireClub(ctx.db, req, currentUser(req), 'deal');
-    const open = await ctx.db.select().from(clubTables)
-      .where(and(eq(clubTables.clubId, access.club.id), eq(clubTables.status, 'open'), isNull(clubTables.dealerId), eq(clubTables.isAutoDeal, false)));
-    return { tables: await Promise.all(open.map((t) => tableView(ctx, t))), needsApproval: false, pending: null };
-  }));
-
-  api.post('/dealer/table/:id/sit', handle(async (req) => {
-    const access = await requireClub(ctx.db, req, currentUser(req), 'deal');
-    return { status: 'seated', table: await tableView(ctx, await sit(ctx, access, String(req.params.id))) };
-  }));
-
-  api.post('/dealer/table/:id/leave', handle(async (req) => {
-    const user = currentUser(req);
-    const access = await requireClub(ctx.db, req, user, 'deal');
-    return { table: await tableView(ctx, await standUp(ctx, access.club.id, String(req.params.id), user.id, 'self')) };
-  }));
-
-  const dealerAction = (fn: (clubId: string, tableId: string, userId: string, body: unknown) => Promise<unknown>) =>
-    handle(async (req) => {
-      const user = currentUser(req);
-      const access = await requireClub(ctx.db, req, user, 'deal');
-      return fn(access.club.id, String(req.params.id), user.id, req.body);
-    });
-
-  api.get('/dealer/table/:id/current-hand', dealerAction(async (clubId, tableId) => {
-    const table = await getTable(ctx.db, clubId, tableId);
-    return { table: await tableView(ctx, table), hand: (await tableView(ctx, table)).currentHand };
-  }));
-
-  api.get('/dealer/table/:id/hands', dealerAction(async (clubId, tableId) => {
-    await getTable(ctx.db, clubId, tableId);
-    const rows = await ctx.db.select().from(hands).where(eq(hands.tableId, tableId)).orderBy(desc(hands.handNumber)).limit(20);
-    return { hands: rows.map(publicHand) };
-  }));
-
-  api.post('/dealer/table/:id/start-hand', dealerAction(async (clubId, tableId, userId) => {
-    const { hand, bettingTimerSeconds } = await startHand(ctx, clubId, tableId, { userId });
-    return { hand: publicHand(hand), bettingTimerSeconds };
-  }));
-
-  api.post('/dealer/table/:id/no-more-bets', dealerAction(async (clubId, tableId, userId) =>
-    ({ hand: publicHand(await noMoreBets(ctx, clubId, tableId, { userId })) })));
-
-  api.post('/dealer/table/:id/enter-flop', dealerAction(async (clubId, tableId, userId, body) => {
-    const { card1, card2, card3 } = z.object({ card1: z.string(), card2: z.string(), card3: z.string() }).parse(body);
-    const info = await enterFlop(ctx, clubId, tableId, { userId }, [card1, card2, card3]);
-    return { hand: publicHand(info.hand), matchingSlugs: info.matchingSlugs };
-  }));
-
-  api.post('/dealer/table/:id/cancel-hand', dealerAction(async (clubId, tableId, userId) =>
-    ({ hand: publicHand(await cancelHand(ctx, clubId, tableId, { userId })) })));
+  // ── Dealer ── routes live in modules/dealer/register.ts (seating, sit requests, console, scan).
 
   // ── Player ──
   api.get('/player/tables', handle(async (req) => {

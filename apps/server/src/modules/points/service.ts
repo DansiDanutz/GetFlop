@@ -1,9 +1,10 @@
 import { and, desc, eq, gte, inArray } from 'drizzle-orm';
 import type { AppContext } from '../../context.js';
-import { memberships, pointRequests, users } from '../../db/schema/index.js';
+import { ledgerEntries, memberships, pointRequests, users } from '../../db/schema/index.js';
 import { AppError } from '../../http/errors.js';
 import { rooms } from '../../realtime/events.js';
 import { can, type ClubAccess } from '../clubs/access.js';
+import { withShortfallNotice } from '../members/shortfall.js';
 import { balanceOf, move, POOL, stock, wallet, type AccountRef } from './ledger.js';
 
 export const NOTE_MAX = 200;
@@ -39,13 +40,23 @@ function notifyBalance(ctx: AppContext, clubId: string, userId: string, balanceC
   ctx.events.emit(rooms.staff(clubId), 'live:changed', { clubId });
 }
 
-export async function mint(ctx: AppContext, access: ClubAccess, amountCents: number, reason: string | undefined) {
+/** Owner mints into the pool. A repeated Idempotency-Key (same club) mints only once. */
+export async function mint(ctx: AppContext, access: ClubAccess, amountCents: number, reason: string | undefined, idempotencyKey?: string) {
   if (!can(access, 'points.mint')) throw new AppError('points.mint_owner_only', 403);
   const note = reason?.trim();
   if (!note) throw new AppError('points.reason_required');
-  await ctx.db.transaction((tx) => move(tx, {
-    clubId: access.club.id, kind: 'mint', from: null, to: POOL, amountCents, actorId: access.user.id, note,
-  }));
+  const key = idempotencyKey?.trim().slice(0, 100) || undefined;
+  await ctx.db.transaction(async (tx) => {
+    if (key) {
+      const [seen] = await tx.select({ id: ledgerEntries.id }).from(ledgerEntries)
+        .where(and(eq(ledgerEntries.clubId, access.club.id), eq(ledgerEntries.refType, 'mint_key'), eq(ledgerEntries.refId, key))).limit(1);
+      if (seen) return;
+    }
+    await move(tx, {
+      clubId: access.club.id, kind: 'mint', from: null, to: POOL, amountCents, actorId: access.user.id, note,
+      ...(key ? { refType: 'mint_key', refId: key } : {}),
+    });
+  });
 }
 
 /** Send Out (load) or Claim Back (withdraw) between the staff source and a member's wallet. */
@@ -58,13 +69,13 @@ export async function staffTransfer(
   const source = staffSource(access);
   const shortCode = source.kind === 'pool' ? (can(access, 'points.mint') ? 'points.pool_short_owner' : 'points.pool_short') : 'points.stock_short';
   const text = assertNote(note);
-  const balance = await ctx.db.transaction(async (tx) => {
+  const balance = await withShortfallNotice(ctx, access, amountCents, () => ctx.db.transaction(async (tx) => {
     await move(tx, direction === 'load'
       ? { clubId, kind: 'deposit', from: source, to: wallet(userId), amountCents, actorId: access.user.id, note: text, shortCode }
       : { clubId, kind: 'withdrawal', from: wallet(userId), to: source, amountCents, actorId: access.user.id, note: text, userId,
           shortCode: 'points.over_balance' });
     return balanceOf(tx, clubId, wallet(userId));
-  });
+  }));
   notifyBalance(ctx, clubId, userId, balance);
   return balance;
 }
@@ -78,16 +89,17 @@ export async function moveStock(
     .where(and(eq(memberships.clubId, clubId), eq(memberships.userId, inspectorId), eq(memberships.status, 'active'))).limit(1);
   if (!m?.roles.includes('inspector')) throw new AppError('points.stock_not_inspector');
   const text = assertNote(note);
-  return ctx.db.transaction(async (tx) => {
+  const poolShort = can(access, 'points.mint') ? 'points.pool_short_owner' : 'points.pool_short';
+  return withShortfallNotice(ctx, access, amountCents, () => ctx.db.transaction(async (tx) => {
     const held = await balanceOf(tx, clubId, stock(inspectorId));
     if (direction === 'take' && amountCents > held) {
       throw new AppError('points.stock_take_more_than_held', 409, { stock: held, asked: amountCents });
     }
     await move(tx, direction === 'give'
-      ? { clubId, kind: 'stock_give', from: POOL, to: stock(inspectorId), amountCents, actorId: access.user.id, note: text, shortCode: 'points.pool_short_owner' }
+      ? { clubId, kind: 'stock_give', from: POOL, to: stock(inspectorId), amountCents, actorId: access.user.id, note: text, shortCode: poolShort }
       : { clubId, kind: 'stock_take', from: stock(inspectorId), to: POOL, amountCents, actorId: access.user.id, note: text });
     return balanceOf(tx, clubId, stock(inspectorId));
-  });
+  }));
 }
 
 export type RequestKind = 'load' | 'cashout';

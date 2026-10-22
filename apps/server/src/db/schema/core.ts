@@ -18,6 +18,8 @@ export const users = pgTable('users', {
   email: text('email'),
   emailVerifiedAt: timestamp('email_verified_at', { withTimezone: true }),
   googleSub: text('google_sub'),
+  /** Email of the linked Google identity (shown on the account page). */
+  googleEmail: text('google_email'),
   language: text('language').notNull().default('en'),
   isActive: boolean('is_active').notNull().default(true),
   isPlatformAdmin: boolean('is_platform_admin').notNull().default(false),

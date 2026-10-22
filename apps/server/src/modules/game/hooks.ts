@@ -20,6 +20,13 @@ export type SettledHook = (ctx: AppContext, tx: Tx, info: SettledInfo) => Promis
 export type AfterHook = (ctx: AppContext, info: SettledInfo) => void | Promise<void>;
 /** Before a coupon is accepted: throw an AppError to refuse (tournament rules, billing pauses …). */
 export type CouponGuard = (ctx: AppContext, tx: Tx, input: { table: TableRowT; userId: string; commitment: number; rounds: number }) => Promise<void>;
+/**
+ * Before the engine checks a coupon against the table limits: throw an AppError to refuse.
+ * Tournaments use it because their rules (level minimum, all-in, chips) replace table limits.
+ */
+export type CouponPreCheck = (ctx: AppContext, tx: Tx, input: {
+  table: TableRowT; userId: string; selections: readonly { market: string; stakeCents: number }[]; rounds: number;
+}) => Promise<void>;
 /** Before a hand starts: throw to refuse (billing pause, tournament not running …). */
 export type StartGuard = (ctx: AppContext, tx: Tx, table: TableRowT) => Promise<void>;
 
@@ -27,5 +34,6 @@ export const hooks = {
   settled: [] as SettledHook[],
   afterSettled: [] as AfterHook[],
   couponGuards: [] as CouponGuard[],
+  couponPreChecks: [] as CouponPreCheck[],
   startGuards: [] as StartGuard[],
 };

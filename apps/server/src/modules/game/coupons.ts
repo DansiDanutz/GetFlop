@@ -40,6 +40,7 @@ export async function placeCoupon(ctx: AppContext, access: ClubAccess, input: Pl
     const cat = await catalogue(tx);
     const unavailable = input.selections.filter((s) => !cat.get(s.market)?.active);
     if (unavailable.length > 0) throw new AppError('coupon.selection_unavailable', 409, { names: unavailable.map((s) => s.market).join(', ') });
+    for (const check of hooks.couponPreChecks) await check(ctx, tx, { table, userId, selections: input.selections, rounds: input.rounds });
     const built = buildCoupon(input, {
       offered: offeredAt(table.markets, cat),
       limits: toEngineLimits(table.limits),

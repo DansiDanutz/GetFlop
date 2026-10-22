@@ -1,0 +1,43 @@
+/* Owner / manager screens (members, member card, club settings, Points supply, codes). */
+.own-row { display: flex; align-items: center; gap: 12px; padding: 12px 4px; width: 100%; text-align: left; background: none; border: 0; color: inherit; cursor: pointer; }
+.own-row + .own-row { border-top: 1px solid var(--border); }
+.own-avatar { width: 42px; height: 42px; flex: none; border-radius: 50%; background: var(--felt); color: var(--gold); display: grid; place-items: center; font: 800 18px var(--font-display); overflow: hidden; }
+.own-avatar.lg { width: 64px; height: 64px; font-size: 26px; }
+.own-avatar img { width: 100%; height: 100%; object-fit: cover; }
+.own-roles { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.own-role { padding: 2px 8px; border-radius: var(--radius-pill); font-size: 11px; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; background: var(--surface-3); color: var(--text-2); }
+.own-role.owner { background: var(--gold-soft); color: var(--gold-2); }
+.own-role.manager { background: rgba(120, 160, 255, 0.16); color: #a9c1ff; }
+.own-role.inspector { background: var(--green-soft); color: var(--green); }
+.own-role.dealer { background: rgba(240, 169, 43, 0.16); color: var(--amber); }
+.own-role.watch { background: var(--danger-soft); color: #ffb4b2; }
+.own-amount { font: 800 16px var(--font-display); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.own-chips { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 2px; }
+.own-chips .chip { white-space: nowrap; }
+.own-tiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.own-tiles .tile { min-height: 76px; padding: 10px 12px; }
+.own-tiles .tile .value { font-size: 20px; }
+.own-toggle { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 0; }
+.own-toggle + .own-toggle { border-top: 1px solid var(--border); }
+.own-note { font-size: 13px; color: var(--text-3); }
+.own-switch { position: relative; width: 56px; height: 32px; flex: none; border-radius: 16px; border: 1px solid var(--border-strong); background: var(--surface-3); cursor: pointer; }
+.own-switch::after { content: ''; position: absolute; top: 3px; left: 3px; width: 24px; height: 24px; border-radius: 50%; background: var(--text-2); transition: transform 0.15s; }
+.own-switch[aria-checked='true'] { background: var(--green-soft); border-color: var(--green); }
+.own-switch[aria-checked='true']::after { transform: translateX(24px); background: var(--green); }
+.own-switch:disabled { opacity: 0.4; cursor: not-allowed; }
+.own-line { display: flex; justify-content: space-between; gap: 12px; padding: 8px 0; font-variant-numeric: tabular-nums; }
+.own-line + .own-line { border-top: 1px dashed var(--border); }
+.own-line.total { font-weight: 800; border-top: 1px solid var(--border-strong); }
+.own-receipt { text-align: center; display: grid; gap: 6px; padding: 12px 0; }
+.own-receipt .kind { font: 800 14px var(--font-display); letter-spacing: 0.16em; color: var(--gold); }
+.own-receipt .big { font: 800 40px/1 var(--font-display); font-variant-numeric: tabular-nums; }
+.own-qr { display: grid; justify-items: center; gap: 10px; }
+.own-code-clock { font: 700 14px var(--font-display); color: var(--text-2); }
+.own-crop { position: relative; width: min(80vw, 300px); aspect-ratio: 1; margin: 0 auto; overflow: hidden; border-radius: 16px; background: #000; touch-action: none; cursor: grab; }
+.own-crop img { position: absolute; left: 50%; top: 50%; max-width: none; user-select: none; pointer-events: none; }
+.own-video { width: 100%; max-height: 50vh; border-radius: 16px; background: #000; object-fit: cover; }
+.own-step { display: flex; align-items: center; gap: 12px; padding: 10px 0; }
+.own-step + .own-step { border-top: 1px solid var(--border); }
+.own-step .tick { width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; flex: none; border: 2px solid var(--border-strong); color: var(--text-3); font-weight: 800; }
+.own-step .tick.done { border-color: var(--green); background: var(--green-soft); color: var(--green); }
+.own-danger { border-color: rgba(239, 83, 80, 0.35); }

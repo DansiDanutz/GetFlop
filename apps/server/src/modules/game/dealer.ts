@@ -1,11 +1,12 @@
 import { and, count, eq, inArray } from 'drizzle-orm';
 import type { AppContext } from '../../context.js';
-import type { DbOrTx } from '../../db/client.js';
-import { clubTables, clubs, coupons } from '../../db/schema/index.js';
+import type { DbOrTx, Tx } from '../../db/client.js';
+import { clubTables, clubs, coupons, memberships } from '../../db/schema/index.js';
 import { AppError } from '../../http/errors.js';
 import { rooms } from '../../realtime/events.js';
 import { can, type ClubAccess } from '../clubs/access.js';
-import { emitTableChanged, getTable, liveHand } from './tables.js';
+import { addDealerNotice } from '../dealer/notices.js';
+import { emitTableChanged, getTable, liveHand, type TableRow } from './tables.js';
 
 /** The table this user is dealing anywhere (a dealer holds one table across all clubs). */
 export async function heldTable(db: DbOrTx, userId: string) {
@@ -15,25 +16,50 @@ export async function heldTable(db: DbOrTx, userId: string) {
   return row ?? null;
 }
 
-export async function seatDealer(ctx: AppContext, clubId: string, tableId: string, dealerId: string) {
-  return ctx.db.transaction(async (tx) => {
-    const table = await getTable(tx, clubId, tableId, true);
-    if (table.isAutoDeal) throw new AppError('dealer.auto_table');
-    if (table.status !== 'open' || (table.dealerId && table.dealerId !== dealerId)) {
-      throw new AppError('dealer.table_taken', 409, { table: table.name });
-    }
-    const held = await heldTable(tx, dealerId);
-    if (held && held.table.id !== tableId) {
-      throw new AppError(held.table.clubId === clubId ? 'dealer.holds_other' : 'dealer.you_deal_elsewhere', 409, {
-        table: held.table.name, club: held.clubName,
-      });
-    }
-    const [own] = await tx.select({ n: count() }).from(coupons)
-      .where(and(eq(coupons.tableId, tableId), eq(coupons.userId, dealerId), eq(coupons.status, 'live')));
-    if ((own?.n ?? 0) > 0) throw new AppError('dealer.own_live_coupons', 409, { n: own!.n, table: table.name });
-    const [updated] = await tx.update(clubTables).set({ dealerId }).where(eq(clubTables.id, tableId)).returning();
-    return updated!;
+/** Refuses a dealer who has live coupons on the table they want to deal (dealer.own_live_coupons). */
+export async function assertNoOwnLiveCoupons(db: DbOrTx, table: TableRow, dealerId: string): Promise<void> {
+  const [own] = await db.select({ n: count() }).from(coupons)
+    .where(and(eq(coupons.tableId, table.id), eq(coupons.userId, dealerId), eq(coupons.status, 'live')));
+  if ((own?.n ?? 0) > 0) throw new AppError('dealer.own_live_coupons', 409, { n: own!.n, table: table.name });
+}
+
+/** Seats a dealer inside an open transaction. Every seating path (sit, switch, approve, assign) goes through here. */
+export async function seatInTx(tx: Tx, clubId: string, tableId: string, dealerId: string): Promise<TableRow> {
+  const table = await getTable(tx, clubId, tableId, true);
+  if (table.isAutoDeal) throw new AppError('dealer.auto_table');
+  if (table.status !== 'open' || (table.dealerId && table.dealerId !== dealerId)) {
+    throw new AppError('dealer.table_taken', 409, { table: table.name });
+  }
+  const held = await heldTable(tx, dealerId);
+  if (held && held.table.id !== tableId) {
+    throw new AppError(held.table.clubId === clubId ? 'dealer.holds_other' : 'dealer.you_deal_elsewhere', 409, {
+      table: held.table.name, club: held.clubName,
+    });
+  }
+  await assertNoOwnLiveCoupons(tx, table, dealerId);
+  const [updated] = await tx.update(clubTables).set({ dealerId }).where(eq(clubTables.id, tableId)).returning();
+  return updated!;
+}
+
+/**
+ * Staff put a dealer on a table. A dealer seated at another table is refused (dealer.busy_elsewhere)
+ * and gets a persistent dealer.wanted_elsewhere notice.
+ */
+async function assertFreeForStaff(ctx: AppContext, staff: ClubAccess, tableId: string, dealerId: string): Promise<void> {
+  const [m] = await ctx.db.select({ roles: memberships.roles }).from(memberships)
+    .where(and(eq(memberships.clubId, staff.club.id), eq(memberships.userId, dealerId), eq(memberships.status, 'active')));
+  if (!m?.roles.includes('dealer')) throw new AppError('dealer.not_found', 404);
+  const held = await heldTable(ctx.db, dealerId);
+  if (!held || held.table.id === tableId) return;
+  await addDealerNotice(ctx, dealerId, 'dealer.wanted_elsewhere', {
+    wantedBy: staff.user.displayName ?? staff.user.username, table: held.table.name, club: held.clubName,
   });
+  throw new AppError('dealer.busy_elsewhere', 409, { table: held.table.name });
+}
+
+export async function seatDealer(ctx: AppContext, clubId: string, tableId: string, dealerId: string, opts: { staff?: ClubAccess } = {}) {
+  if (opts.staff) await assertFreeForStaff(ctx, opts.staff, tableId, dealerId);
+  return ctx.db.transaction((tx) => seatInTx(tx, clubId, tableId, dealerId));
 }
 
 /** A dealer sits at an open table with no dealer. */

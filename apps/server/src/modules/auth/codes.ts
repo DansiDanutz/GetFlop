@@ -7,7 +7,7 @@ import { numericCode, sha256 } from './crypto.js';
 export const CODE_TTL_MINUTES = 15;
 export const MAX_CODE_ATTEMPTS = 5;
 
-export type CodePurpose = 'register' | 'email_verify' | 'pin_reset';
+export type CodePurpose = 'register' | 'email_verify' | 'pin_reset' | 'google_register';
 
 interface IssueOptions {
   readonly purpose: CodePurpose;

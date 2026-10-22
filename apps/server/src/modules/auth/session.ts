@@ -1,7 +1,7 @@
-import { and, eq, gt } from 'drizzle-orm';
+import { and, eq, gt, lte } from 'drizzle-orm';
 import type { NextFunction, Request, RequestHandler, Response } from 'express';
 import type { AppContext } from '../../context.js';
-import { sessions, users } from '../../db/schema/index.js';
+import { sessionRevocations, sessions, users } from '../../db/schema/index.js';
 import { AppError } from '../../http/errors.js';
 import { newToken, sha256 } from './crypto.js';
 
@@ -10,11 +10,17 @@ const SESSION_DAYS = 30;
 
 export type AuthUser = typeof users.$inferSelect;
 
+/** Why a presented token no longer works (401 auth.session_ended / session.expired). */
+export type SessionProblem =
+  | { readonly kind: 'ended'; readonly reason: string; readonly deviceLabel: string | null }
+  | { readonly kind: 'expired' };
+
 declare global {
   // eslint-disable-next-line @typescript-eslint/no-namespace
   namespace Express {
     interface Request {
       user?: AuthUser;
+      sessionProblem?: SessionProblem;
     }
   }
 }
@@ -54,11 +60,24 @@ export function tokenFrom(req: Request): string | undefined {
   return (req.cookies as Record<string, string> | undefined)?.[SESSION_COOKIE];
 }
 
-/** Attaches req.user when a valid session is present. Never rejects. */
+/** For a token that did not resolve to a user: was it revoked, or has it expired? */
+export async function sessionProblem(ctx: AppContext, token: string | undefined): Promise<SessionProblem | undefined> {
+  if (!token) return undefined;
+  const id = sha256(token);
+  const [revoked] = await ctx.db.select().from(sessionRevocations).where(eq(sessionRevocations.id, id)).limit(1);
+  if (revoked) return { kind: 'ended', reason: revoked.reason, deviceLabel: revoked.deviceLabel };
+  const [expired] = await ctx.db.select({ id: sessions.id }).from(sessions)
+    .where(and(eq(sessions.id, id), lte(sessions.expiresAt, ctx.now()))).limit(1);
+  return expired ? { kind: 'expired' } : undefined;
+}
+
+/** Attaches req.user when a valid session is present, or the reason it is not. Never rejects. */
 export function loadUser(ctx: AppContext): RequestHandler {
   return async (req: Request, _res: Response, next: NextFunction) => {
     try {
-      req.user = (await userFromToken(ctx, tokenFrom(req))) ?? undefined;
+      const token = tokenFrom(req);
+      req.user = (await userFromToken(ctx, token)) ?? undefined;
+      if (!req.user) req.sessionProblem = await sessionProblem(ctx, token);
       next();
     } catch (err) {
       next(err);
@@ -67,7 +86,16 @@ export function loadUser(ctx: AppContext): RequestHandler {
 }
 
 export function currentUser(req: Request): AuthUser {
-  if (!req.user) throw new AppError('auth.required', 401);
+  if (!req.user) {
+    const problem = req.sessionProblem;
+    if (problem?.kind === 'expired') throw new AppError('session.expired', 401);
+    if (problem?.kind === 'ended') {
+      throw new AppError('auth.session_ended', 401, {
+        reason: problem.reason, ...(problem.deviceLabel ? { deviceLabel: problem.deviceLabel } : {}),
+      });
+    }
+    throw new AppError('auth.required', 401);
+  }
   return req.user;
 }
 

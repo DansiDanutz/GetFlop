@@ -4,6 +4,8 @@ import { Spinner } from './components/ui';
 import { ROUTES, type AppRoute } from './routes';
 import { useSession } from './state/session';
 import { TermsGate } from './features/auth/TermsGate';
+import { MeOverlays } from './features/me/MeOverlays';
+import { MessageCards } from './features/messages';
 
 function Guard({ route }: { route: AppRoute }): ReactElement {
   const { user, loading, context, contextLoading } = useSession();
@@ -24,9 +26,13 @@ function Guard({ route }: { route: AppRoute }): ReactElement {
 export function App() {
   const { user } = useSession();
   return (
-    <Routes>
-      {ROUTES.map((r) => <Route key={r.path} path={r.path} element={<Guard route={r} />} />)}
-      <Route path="*" element={<Navigate to={user ? (user.role === 'admin' ? '/admin' : '/clubs') : '/login'} replace />} />
-    </Routes>
+    <>
+      <Routes>
+        {ROUTES.map((r) => <Route key={r.path} path={r.path} element={<Guard route={r} />} />)}
+        <Route path="*" element={<Navigate to={user ? (user.role === 'admin' ? '/admin' : '/clubs') : '/login'} replace />} />
+      </Routes>
+      <MeOverlays />
+      <MessageCards />
+    </>
   );
 }

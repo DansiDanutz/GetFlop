@@ -8,6 +8,7 @@ import { Empty, Spinner } from '../../components/ui';
 import { api } from '../../lib/api';
 import { useT } from '../../i18n/i18n';
 import { useSession, type ClubContext } from '../../state/session';
+import { PendingInviteBanner } from '../me/Invites';
 
 export interface MyClub {
   id: string; publicId: string; name: string; description: string | null; photoUrl: string | null;
@@ -44,6 +45,7 @@ export function Clubs() {
       <TopBar />
       <div className="screen-body">
         <div className="row-between"><h1>{t('clubs_title')}</h1></div>
+        <PendingInviteBanner />
         {clubs.isLoading && <Spinner />}
         {clubs.data?.clubs.length === 0 && <Empty icon="♣" title={t('clubs_empty')}>{t('clubs_empty_sub')}</Empty>}
         <div className="stack">

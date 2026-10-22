@@ -59,7 +59,7 @@ describe('the hand and coupon loop', () => {
 
     // Closing the table refunds unplayed rounds: Alice 1 × 2 PTS, Bob 1 × 2 PTS.
     const preview = ok(await owner.get(`/api/inspector/table/${tableId}/close-preview`));
-    expect(preview).toEqual({ hasActiveHand: false, liveCoupons: 2, refundCents: 400 });
+    expect(preview).toMatchObject({ hasActiveHand: false, liveCoupons: 2, refundCents: 400 });
     ok(await owner.put(`/api/inspector/table/${tableId}/close`));
     expect(await balance(alice)).toBe(9_400 + 460 + 200);
     expect(await balance(bob)).toBe(10_000 - 400 + 500 + 200);

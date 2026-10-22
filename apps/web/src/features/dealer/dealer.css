@@ -1,0 +1,62 @@
+/* ── Dealer surface ── */
+.stack-sm { display: grid; gap: 6px; }
+.stack-xs { display: grid; gap: 2px; }
+.row.wrap { flex-wrap: wrap; }
+.pill.gold-pill { background: var(--gold-soft); color: var(--gold-2); }
+.dealer-mine { border-color: rgba(217, 164, 65, 0.45); box-shadow: 0 0 0 1px rgba(217, 164, 65, 0.18), var(--shadow); }
+.dealer-mine .table-name { font: 800 22px/1.1 var(--font-display); color: var(--cream); }
+.qr-block { display: grid; justify-items: center; gap: 12px; text-align: center; }
+.qr-block code { word-break: break-all; font-size: 12px; }
+
+/* Coach marks */
+.coach-anchor { position: relative; display: grid; }
+.coach-bubble { position: absolute; right: 0; bottom: calc(100% + 10px); z-index: 5; width: max-content; max-width: 220px; padding: 8px 12px; border-radius: 12px; background: var(--gold); color: #22170a; font-weight: 700; font-size: 14px; box-shadow: var(--shadow); animation: coach-pulse 1.6s ease-in-out infinite; }
+.coach-bubble::after { content: ''; position: absolute; right: 22px; top: 100%; border: 7px solid transparent; border-top-color: var(--gold); }
+.coach-bubble.up { left: 50%; right: auto; transform: translateX(-50%); }
+.coach-bubble.up::after { right: auto; left: calc(50% - 7px); }
+@keyframes coach-pulse { 50% { opacity: 0.82; } }
+
+/* Console */
+.console-head { display: flex; align-items: center; gap: 12px; }
+.console-head h1 { font: 800 26px/1.1 var(--font-display); color: var(--cream); margin: 0; }
+.console-ring { width: 76px; height: 76px; flex: none; }
+.console-ring .ring { width: 76px; height: 76px; }
+.console-ring .ring .value { font-size: 30px; }
+.console-flop { display: grid; gap: 10px; justify-items: center; padding: 18px 12px; border-radius: var(--radius-lg); background: var(--bg-felt), var(--felt); border: 1px solid rgba(217, 164, 65, 0.25); }
+.console-flop .flop-row { width: 100%; max-width: 420px; }
+
+.recent-hands .hand-row { gap: 10px; }
+.hand-no { font: 800 15px var(--font-display); color: var(--gold-2); min-width: 40px; font-variant-numeric: tabular-nums; }
+.hand-outcome { font-weight: 700; color: var(--text-2); text-align: right; }
+.hand-outcome.won { color: var(--green); }
+.hand-row.cancelled { opacity: 0.6; }
+
+/* Bottom dock: big red pill + dark cancel, always in the same place */
+.dealer-dock .hint { margin: 0; }
+.btn.dealer-pill { border-radius: var(--radius-pill); min-height: 72px; font-size: 22px; }
+.btn.dealer-cancel { border-radius: var(--radius-pill); background: #101512; border: 1px solid var(--border-strong); color: var(--text); min-height: 56px; font-size: 17px; }
+
+/* Flop picker (full screen) */
+.dealer-picker { display: flex; flex-direction: column; gap: 14px; padding: 12px var(--gutter) calc(18px + var(--safe-bottom)); }
+.dealer-picker > * { max-width: 720px; width: 100%; margin-left: auto; margin-right: auto; }
+.picker-head { display: flex; align-items: center; gap: 8px; }
+.picker-head h2 { font: 800 20px/1.1 var(--font-display); color: var(--cream); margin: 0; }
+.picker-slots { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; justify-items: center; }
+.picker-slot { background: none; border: 0; padding: 0; width: 100%; display: grid; justify-items: center; cursor: pointer; border-radius: 10px; }
+.picker-slot .pcard { width: 100%; }
+.picker-slot .pcard.empty { font: 800 26px var(--font-display); opacity: 0.55; }
+.picker-slot.active .pcard.empty { opacity: 1; border-style: solid; border-color: var(--red); box-shadow: 0 0 0 3px rgba(216, 52, 44, 0.25); }
+.picker-slot:focus-visible { outline: 2px solid var(--gold); outline-offset: 3px; }
+.picker-body { display: grid; gap: 14px; align-content: start; }
+.picker-prompt { margin: 0; text-align: center; font: 700 18px var(--font-display); color: var(--gold-2); }
+.pick-grid.ranks { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+.pick-key { transition: transform 0.08s; }
+.pick-key:active { transform: scale(0.96); }
+.pick-grid.suits .pick-key.suit { min-height: 150px; font-size: 76px; }
+
+.picker-deck { display: grid; gap: 8px; }
+.picker-deck-row { display: grid; grid-template-columns: repeat(13, minmax(0, 1fr)); gap: 6px; }
+.deck-key { display: grid; place-items: center; gap: 0; aspect-ratio: 5 / 7; border-radius: 8px; background: var(--cream); border: 1px solid var(--cream-2); color: var(--ink); font: 800 16px/1 var(--font-display); cursor: pointer; }
+.deck-key.red { color: var(--suit-red); }
+.deck-key.on { background: var(--gold-2); border-color: var(--gold); box-shadow: 0 0 0 3px rgba(217, 164, 65, 0.4); }
+@media (max-width: 640px) { .picker-deck-row { grid-template-columns: repeat(7, minmax(0, 1fr)); } }

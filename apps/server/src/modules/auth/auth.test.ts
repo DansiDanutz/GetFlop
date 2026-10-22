@@ -72,7 +72,7 @@ describe('login and sessions', () => {
   it('keeps one device at a time', async () => {
     const first = await env.login('nick');
     await env.login('nick');
-    expect(errCode(await first.get('/api/auth/me'))).toBe('auth.required');
+    expect(errCode(await first.get('/api/auth/me'))).toBe('auth.session_ended');
     expect(env.events.named('session:ended')).toHaveLength(1);
   });
 

@@ -1,0 +1,54 @@
+/* Floor / inspector surface. Uses the shared tokens; everything is scoped with insp-. */
+
+.insp-sub { display: block; font-size: 13px; line-height: 1.35; }
+.insp-rowtext { display: grid; gap: 2px; text-align: left; }
+.insp-rowbtn { background: none; border: 0; color: inherit; text-align: left; cursor: pointer; padding: 0; display: flex; align-items: center; gap: 12px; width: 100%; }
+.insp-table-row { gap: 10px; }
+.insp-choice { cursor: pointer; }
+.insp-choice input { width: 22px; height: 22px; accent-color: var(--gold); flex: none; }
+.insp-danger-text { color: var(--danger); border-color: rgba(239, 83, 80, 0.4); }
+.insp-break { word-break: break-all; font-size: 12px; }
+.insp-code { font: 800 26px/1 var(--font-display); letter-spacing: 0.18em; color: var(--gold-2); }
+.insp-headline { font: 800 34px/1.1 var(--font-display); color: var(--gold-2); font-variant-numeric: tabular-nums; }
+
+/* Attention list */
+.insp-alert { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--surface); font-weight: 600; }
+.insp-alert.danger { border-color: rgba(239, 83, 80, 0.45); background: var(--danger-soft); color: #ffc9c7; }
+.insp-alert.attention { border-color: rgba(240, 169, 43, 0.45); background: rgba(240, 169, 43, 0.12); color: #ffd99a; }
+.insp-alert.waiting { border-color: rgba(217, 164, 65, 0.35); background: var(--gold-soft); color: var(--gold-2); }
+.insp-alert .btn { min-height: 40px; padding: 8px 14px; font-size: 14px; }
+.insp-clear { display: grid; gap: 4px; border-color: rgba(63, 191, 122, 0.4); background: var(--green-soft); }
+.insp-clear strong { font: 800 22px/1 var(--font-display); letter-spacing: 0.12em; color: var(--green); }
+.insp-setup { display: grid; gap: 8px; border-color: rgba(217, 164, 65, 0.45); background: linear-gradient(180deg, var(--gold-soft), transparent); }
+
+/* Lobby card preview */
+.insp-card-preview { min-height: 120px; border-radius: var(--radius); padding: 14px; display: flex; flex-direction: column; justify-content: flex-end; gap: 6px;
+  background-size: cover; background-position: center; border: 1px solid var(--border-strong); box-shadow: inset 0 -60px 60px -20px rgba(0, 0, 0, 0.7); }
+.insp-card-preview.felt { background: radial-gradient(120% 90% at 50% 10%, var(--felt-2), var(--felt) 60%, #0a2419); }
+.insp-card-preview strong { font: 800 20px var(--font-display); color: var(--cream); }
+
+/* Markets & limits */
+.insp-market { min-height: 40px; align-items: center; }
+.insp-limit-input { width: 96px; text-align: right; }
+
+/* Requests */
+.insp-request .btn { min-height: 42px; padding: 8px 14px; }
+
+/* Reports */
+.insp-strip { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.insp-strip .tile { min-height: 76px; padding: 10px 12px; }
+.insp-strip .value { font-size: 20px; }
+.insp-kv { padding: 8px 2px; }
+.insp-live-row.big { background: var(--gold-soft); box-shadow: inset 3px 0 0 var(--gold); }
+.insp-player { justify-content: flex-start; font-size: 15px; }
+.insp-pill { position: sticky; top: 76px; z-index: 5; justify-self: center; min-height: 36px; padding: 6px 16px; border-radius: var(--radius-pill); }
+.insp-band-row { display: grid; gap: 6px; padding: 8px 0; border-bottom: 1px solid var(--border); }
+.insp-band { position: relative; height: 12px; border-radius: 6px; background: var(--surface-3); }
+.insp-band-range { position: absolute; top: 0; bottom: 0; border-radius: 6px; background: rgba(63, 191, 122, 0.3); }
+.insp-band-theo { position: absolute; top: -2px; bottom: -2px; width: 2px; background: var(--text-2); }
+.insp-band-actual { position: absolute; top: -3px; width: 12px; height: 18px; margin-left: -6px; border-radius: 4px; background: var(--gold); }
+.insp-verdict.above { background: var(--green-soft); color: var(--green); }
+.insp-verdict.below { background: var(--danger-soft); color: var(--danger); }
+.insp-verdict.low_volume { color: var(--text-3); }
+details.card > summary { cursor: pointer; list-style: none; }
+details.card > summary::-webkit-details-marker { display: none; }

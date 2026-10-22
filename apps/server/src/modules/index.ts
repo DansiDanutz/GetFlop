@@ -11,6 +11,7 @@ import { registerInspector } from './inspector/register.js';
 import { registerMembers } from './members/register.js';
 import { registerMessages } from './messages/register.js';
 import { registerPlayer } from './player/register.js';
+import { registerMe } from './me/register.js';
 import { registerPoints } from './points/routes.js';
 import { registerTournaments } from './tournaments/register.js';
 import { registerTv } from './tv/register.js';
@@ -28,6 +29,7 @@ const MODULES: ModuleRegistrar[] = [
   registerGame,
   registerDealer,
   registerPlayer,
+  registerMe,
   registerInspector,
   registerMembers,
   registerMessages,

@@ -1,0 +1,20 @@
+/* Platform admin: nine tabs scroll sideways on a phone. */
+.admin-tabs { grid-auto-columns: minmax(68px, 1fr); overflow-x: auto; scrollbar-width: none; }
+.admin-tabs::-webkit-scrollbar { display: none; }
+.admin .kpis { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+.admin .tile { min-height: 84px; }
+.admin .tile .value { font-size: 22px; }
+.admin .neg { color: var(--danger); }
+.admin .pos { color: var(--green); }
+.admin .row-card { display: grid; gap: 4px; text-align: left; width: 100%; }
+.admin .row-card .meta { color: var(--text-2); font-size: 13px; }
+.admin .edge-neg { border-color: rgba(239, 83, 80, 0.6); background: var(--danger-soft); }
+.admin .table-wrap { overflow-x: auto; }
+.admin .data td, .admin .data th { white-space: nowrap; }
+.admin .filters { display: grid; gap: 8px; }
+.admin .kv { display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; font-size: 14px; }
+.admin .kv dt { color: var(--text-3); }
+.admin .kv dd { margin: 0; }
+.admin .pager { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+.admin textarea { min-height: 84px; resize: vertical; }
+.admin .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; word-break: break-all; }

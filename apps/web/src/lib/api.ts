@@ -10,14 +10,14 @@ export class ApiError extends Error {
 }
 
 let clubIdHeader: string | null = null;
-let onUnauthorized: ((code: string) => void) | null = null;
+let onUnauthorized: ((code: string, params: Record<string, string | number>) => void) | null = null;
 
 /** The club every request acts on (X-Club-Id). Set by the session provider. */
 export function setApiClub(clubId: string | null): void {
   clubIdHeader = clubId;
 }
 
-export function setUnauthorizedHandler(fn: (code: string) => void): void {
+export function setUnauthorizedHandler(fn: (code: string, params: Record<string, string | number>) => void): void {
   onUnauthorized = fn;
 }
 
@@ -42,7 +42,7 @@ async function request<T>(method: Method, path: string, body?: unknown): Promise
   if (!json) throw new ApiError('server.error', res.status);
   if (!json.success) {
     const err = new ApiError(json.error.code, res.status, json.error.params ?? {});
-    if (res.status === 401) onUnauthorized?.(err.code);
+    if (res.status === 401) onUnauthorized?.(err.code, err.params);
     throw err;
   }
   return json.data;

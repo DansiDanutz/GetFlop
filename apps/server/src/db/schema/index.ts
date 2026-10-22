@@ -5,3 +5,6 @@ export * from './tournaments.js';
 export * from './arena.js';
 export * from './commerce.js';
 export * from './misc.js';
+export * from './inspector.js';
+export * from './members.js';
+export * from './auth.js';

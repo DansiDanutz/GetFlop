@@ -4,6 +4,7 @@ import type { AppContext } from '../../context.js';
 import { handle } from '../../http/respond.js';
 import { currentUser } from '../auth/session.js';
 import { requireClub } from '../clubs/access.js';
+import { pendingDealerSits } from '../dealer/sitRequests.js';
 import { balanceOf, stock, supply, walletDrift, wallet } from './ledger.js';
 import {
   createPlayerRequest, listRequests, mint, moveStock, parseAmount, reviewPlayerRequest, staffTransfer,
@@ -22,7 +23,7 @@ export function registerPoints(api: Router, ctx: AppContext): void {
   api.post('/clubs/:clubId/points/mint', handle(async (req) => {
     const body = z.object({ amount: z.union([z.string(), z.number()]), reason: z.string().optional() }).parse(req.body);
     const access = await requireClub(ctx.db, req, currentUser(req), 'view', String(req.params.clubId));
-    await mint(ctx, access, parseAmount(body.amount), body.reason);
+    await mint(ctx, access, parseAmount(body.amount), body.reason, req.header('idempotency-key'));
     return supply(ctx.db, access.club.id);
   }));
 
@@ -73,6 +74,7 @@ export function registerPoints(api: Router, ctx: AppContext): void {
     return {
       reloads: rows.filter((r) => r.kind === 'load'),
       cashouts: rows.filter((r) => r.kind === 'cashout'),
+      dealerSits: await pendingDealerSits(ctx.db, access.club.id),
       myStock: access.rank >= 3 ? null : await balanceOf(ctx.db, access.club.id, stock(user.id)),
     };
   }));

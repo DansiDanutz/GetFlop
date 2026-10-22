@@ -2,37 +2,27 @@ import { and, eq, ne, sql } from 'drizzle-orm';
 import { Router } from 'express';
 import { z } from 'zod';
 import type { AppContext } from '../../context.js';
-import { sessions, users } from '../../db/schema/index.js';
+import { users } from '../../db/schema/index.js';
 import { AppError } from '../../http/errors.js';
 import { handle } from '../../http/respond.js';
-import { rooms } from '../../realtime/events.js';
 import { consumeCode, issueCode } from './codes.js';
 import { hashSecret, sha256, verifySecret } from './crypto.js';
+import { deleteAccount } from './deleteAccount.js';
+import { assertAvailable, findByUsername, identityOf, publicUser } from './accounts.js';
+import { googleRoutes } from './google.js';
+import { announceEnded, revokeSessions, startSession } from './revocation.js';
 import {
   SESSION_COOKIE, createSession, currentUser, destroySession, setSessionCookie, tokenFrom, type AuthUser,
 } from './session.js';
+
+export { deviceLabel } from './revocation.js';
+export { publicUser } from './accounts.js';
 import { assertDisplayName, assertEmail, assertPin, assertUsername, langSchema } from './validation.js';
 
 export const MAX_FAILED_LOGINS = 5;
 export const LOCK_MINUTES = 5;
 /** Bump when the player terms change; users are asked to accept again. */
 export const TERMS_VERSION = 1;
-
-/** The user as the client sees it. Never includes secrets. */
-export function publicUser(u: AuthUser) {
-  return {
-    id: u.id,
-    username: u.username,
-    displayName: u.displayName ?? u.username,
-    role: u.isPlatformAdmin ? 'admin' : 'player',
-    email: u.email,
-    emailVerified: Boolean(u.emailVerifiedAt),
-    language: u.language,
-    activeClubId: u.activeClubId,
-    playerCode: u.playerCode,
-    termsRequired: !u.termsAcceptedAt,
-  };
-}
 
 const registerSchema = z.object({
   username: z.string(),
@@ -45,34 +35,8 @@ const registerSchema = z.object({
   lang: langSchema,
 });
 
-async function findByUsername(ctx: AppContext, username: string): Promise<AuthUser | undefined> {
-  const [row] = await ctx.db.select().from(users).where(sql`lower(${users.username}) = lower(${username})`).limit(1);
-  return row;
-}
-
-async function assertAvailable(ctx: AppContext, username: string, email: string): Promise<void> {
-  if (await findByUsername(ctx, username)) throw new AppError('auth.username_taken', 409);
-  const [taken] = await ctx.db.select({ id: users.id }).from(users).where(sql`lower(${users.email}) = ${email}`).limit(1);
-  if (taken) throw new AppError('auth.email_taken', 409);
-}
-
-/** Signs in: one device at a time, so every other session is revoked and told. */
-async function startSession(ctx: AppContext, user: AuthUser, userAgent: string | undefined, reason = 'other_device') {
-  const others = await ctx.db.delete(sessions).where(eq(sessions.userId, user.id)).returning({ id: sessions.id });
-  if (others.length > 0) ctx.events.emit(rooms.user(user.id), 'session:ended', { reason, deviceLabel: deviceLabel(userAgent) });
-  return createSession(ctx, user.id, userAgent);
-}
-
-export function deviceLabel(ua: string | undefined): string {
-  if (!ua) return 'other';
-  if (/iPad/.test(ua)) return 'ipad';
-  if (/iPhone/.test(ua)) return 'iphone';
-  if (/Android/.test(ua)) return 'android';
-  if (/Windows/.test(ua)) return 'windows';
-  if (/Macintosh/.test(ua)) return 'mac';
-  if (/Linux/.test(ua)) return 'linux';
-  return 'other';
-}
+/** Status for a wrong PIN from a signed-in user: 403, so the client does not treat it as signed out. */
+export const PIN_WRONG_STATUS = 403;
 
 export function authRouter(ctx: AppContext): Router {
   const r = Router();
@@ -155,12 +119,11 @@ export function authRouter(ctx: AppContext): Router {
   r.post('/pin/change', handle(async (req) => {
     const user = currentUser(req);
     const body = z.object({ pin: z.string(), newPin: z.string() }).parse(req.body);
-    if (!(await verifySecret(body.pin, user.pinHash))) throw new AppError('auth.pin_wrong', 401);
+    if (!(await verifySecret(body.pin, user.pinHash))) throw new AppError('auth.pin_wrong', PIN_WRONG_STATUS);
     assertPin(body.newPin);
     await ctx.db.update(users).set({ pinHash: await hashSecret(body.newPin) }).where(eq(users.id, user.id));
-    const current = tokenFrom(req);
-    await ctx.db.delete(sessions).where(and(eq(sessions.userId, user.id), ne(sessions.id, sha256(current ?? ''))));
-    ctx.events.emit(rooms.user(user.id), 'session:ended', { reason: 'pin_change' });
+    await revokeSessions(ctx.db, user.id, { reason: 'pin_change', keepSessionId: sha256(tokenFrom(req) ?? '') });
+    announceEnded(ctx, user.id, 'pin_change');
     return {};
   }));
 
@@ -183,26 +146,19 @@ export function authRouter(ctx: AppContext): Router {
     await consumeCode(ctx, { purpose: 'pin_reset', target: user.id }, body.code);
     await ctx.db.update(users).set({ pinHash: await hashSecret(body.newPin), failedLogins: 0, lockedUntil: null })
       .where(eq(users.id, user.id));
-    await ctx.db.delete(sessions).where(eq(sessions.userId, user.id));
-    ctx.events.emit(rooms.user(user.id), 'session:ended', { reason: 'pin_reset' });
+    await revokeSessions(ctx.db, user.id, { reason: 'pin_reset' });
+    announceEnded(ctx, user.id, 'pin_reset');
     return {};
   }));
 
   r.get('/identity', handle((req) => {
-    const user = currentUser(req);
-    return {
-      email: user.email,
-      emailVerified: Boolean(user.emailVerifiedAt),
-      google: { linked: Boolean(user.googleSub) },
-      googleEnabled: Boolean(process.env.GOOGLE_CLIENT_ID),
-      marketingEmail: Boolean(user.marketingConsent),
-    };
+    return identityOf(currentUser(req));
   }));
 
   r.post('/email', handle(async (req) => {
     const user = currentUser(req);
     const body = z.object({ email: z.string(), pin: z.string() }).parse(req.body);
-    if (!(await verifySecret(body.pin, user.pinHash))) throw new AppError('auth.pin_wrong', 401);
+    if (!(await verifySecret(body.pin, user.pinHash))) throw new AppError('auth.pin_wrong', PIN_WRONG_STATUS);
     const email = assertEmail(body.email);
     const [taken] = await ctx.db.select({ id: users.id }).from(users)
       .where(and(sql`lower(${users.email}) = ${email}`, ne(users.id, user.id))).limit(1);
@@ -239,11 +195,14 @@ export function authRouter(ctx: AppContext): Router {
     return {};
   }));
 
-  r.get('/google/config', handle(() => ({
-    enabled: Boolean(process.env.GOOGLE_CLIENT_ID),
-    clientId: process.env.GOOGLE_CLIENT_ID ?? null,
-  })));
+  r.post('/delete-account', handle(async (req, res) => {
+    const { pin } = z.object({ pin: z.string() }).parse(req.body);
+    await deleteAccount(ctx, currentUser(req), pin);
+    res.clearCookie(SESSION_COOKIE, { path: '/' });
+    return {};
+  }));
 
+  googleRoutes(r, ctx);
   return r;
 }
 

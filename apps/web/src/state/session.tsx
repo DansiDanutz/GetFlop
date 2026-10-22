@@ -2,6 +2,7 @@ import { QueryClient, useQuery, useQueryClient } from '@tanstack/react-query';
 import { createContext, useCallback, useContext, useEffect, useMemo, type ReactNode } from 'react';
 import { api, ApiError, setApiClub, setUnauthorizedHandler } from '../lib/api';
 import { closeSocket, getSocket } from '../lib/socket';
+import { handleUnauthorized } from '../features/me/sessionEnded';
 
 export interface User {
   id: string;
@@ -74,14 +75,15 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   });
 
   useEffect(() => {
-    setUnauthorizedHandler(() => { qc.setQueryData(['me'], null); });
+    setUnauthorizedHandler((code, params) => { handleUnauthorized(code, params); qc.setQueryData(['me'], null); });
   }, [qc]);
 
   useEffect(() => {
     if (!user) { closeSocket(); return; }
     const s = getSocket();
     const invalidateContext = () => qc.invalidateQueries({ queryKey: ['club-context'] });
-    const ended = () => { qc.setQueryData(['me'], null); closeSocket(); };
+    // Re-check: this device may be the one that changed the PIN. A 401 goes through the handler above.
+    const ended = () => { void api.get('/auth/me').catch(() => undefined); };
     s.on('club:context-changed', invalidateContext);
     s.on('club:membership-changed', () => { invalidateContext(); qc.invalidateQueries({ queryKey: ['clubs'] }); });
     s.on('session:ended', ended);
